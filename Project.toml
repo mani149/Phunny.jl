@@ -1,0 +1,13 @@
+name = "Phunny"
+uuid = "3b98769a-403b-40a5-9695-f803a8ef7baa"
+authors = ["Isaac Ownby", "Immanuel Schmidt"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1.6.7"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
