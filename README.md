@@ -1,6 +1,7 @@
 # Phunny
 
 <!---
+TODO: Add stable version 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://mani149.github.io/Phunny.jl/stable/)
  --->
 
