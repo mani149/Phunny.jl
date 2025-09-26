@@ -18,6 +18,6 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/mani149/Phunny.jl",
+    repo="github.com/mani149/Phunny.jl.git",
     devbranch="main",
 )
