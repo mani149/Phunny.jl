@@ -6,9 +6,23 @@ CurrentModule = Phunny
 
 Documentation for [Phunny](https://github.com/mani149/Phunny.jl).
 
-```@index
+## What's Phunny?
+
+Nothin if u askin
+
+## Example Usage
+
+u could be here
+
+```
+using Phunny
+
+
 ```
 
-```@autodocs
-Modules = [Phunny]
+## Installation
+```julia-repl
+pkg> add https://github.com/mani149/Phunny.jl/
+
 ```
+

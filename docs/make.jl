@@ -8,12 +8,15 @@ makedocs(;
     authors="Isaac Ownby, Immanuel Schmidt",
     sitename="Phunny.jl",
     format=Documenter.HTML(;
+    	prettyurls = get(ENV, "CI", "false") == "true",
         canonical="https://mani149.github.io/Phunny.jl",
         edit_link="main",
         assets=String[],
     ),
     pages=[
         "Home" => "index.md",
+        "Tutorials" => "tutorials.md",
+        "References" => "refs.md"
     ],
 )
 
