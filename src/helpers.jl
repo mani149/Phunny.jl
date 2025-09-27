@@ -389,6 +389,14 @@ function collapse(A; over=:ω, op=sum)
 end
 
 
+# ---------------------------
+# Utility grids
+# ---------------------------
+
+ω_grid(ωmin, ωmax, n) = range(ωmin, ωmax; length=n)
+
+
+
 
 
 
