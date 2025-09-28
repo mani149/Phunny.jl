@@ -1,4 +1,4 @@
-using Phunny
+using Phunny, Sunny
 using Test
 
 # Silicon (diamond structure)

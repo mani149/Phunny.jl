@@ -37,6 +37,12 @@ jobs:
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
+        shell: julia --color=yes {0}
+        run: |
+          using Phunny
+          using Test
+          test Phunny
+          
   docs:
     name: Documentation
     runs-on: ubuntu-latest
