@@ -1,9 +1,10 @@
 
 """
-    phonons(model, Φ, q; q_basis=:cart, q_cell=:primitive)
+    phonons(model, Φ, q; q_basis=:cart, q_cell=:primitive, cryst=nothing)
 
-Diagonalize D(q). Returns (E, Evec) with **energies in meV** and 3N×3N eigenvectors.
-`q` may be in Cartesian Å⁻¹ (`q_basis=:cart`) or RLU (`q_basis=:rlu` with `q_cell=:primitive` or `:conventional`).
+Diagonalizes the mass-weighted dynamic matrix D(q). Returns (eigvals, eigvecs) with **energies in meV** and a 3N×3N 
+block matrix with columns defined by the eigenvectors (phonon polarization vectors).
+The wavevector `q` may be in Cartesian Å⁻¹ (`q_basis=:cart`) or relative lattice untis (R.L.U.) (`q_basis=:rlu` with `q_cell=:primitive` or `:conventional`).
 If passing RLU, also pass the underlying crystal `cryst` via keyword.
 """
 function phonons(model::Model, Φ, q::SVector{3,Float64}; q_basis::Symbol=:cart, q_cell::Symbol=:primitive, cryst=nothing)
@@ -27,10 +28,10 @@ end
 """
     msd_from_phonons(model, Φ; T, cryst, qgrid=(12,12,12), q_cell=:primitive, eps_meV=1e-6)
 
-Compute per-site mean-square displacements ⟨u_s^2⟩(T) in Å² directly from the phonon spectrum:
+Computes the mean-square displacements ⟨u_s^2⟩(T) per-site in Å² directly from the phonon spectrum:
 ⟨u_s^2⟩ = (1/Nq) * Σ_{q,ν} (ħ² / (2 M_s E_J)) * coth(E_J / (2 k_B T)) * Σ_α |e_phys(s,α;q,ν)|²
 where E_J = E_meV ⋅ meV_to_J and e_phys are physical (non mass-weighted) polarization vectors.
-Modes with E ≤ eps_meV are skipped (Γ handling); refine qgrid for convergence.
+Modes with E ≤ eps_meV are skipped (Γ handling); Convergence may require refinement of qgrid.
 """
 function msd_from_phonons(model::Model, Φ;
                           T::Real, cryst, qgrid::NTuple{3,Int}=(12,12,12),
@@ -66,7 +67,7 @@ end
 """
     B_isotropic_from_phonons(model, Φ; T, cryst, qgrid=(12,12,12), q_cell=:primitive, eps_meV=1e-6)
 
-Return isotropic Debye–Waller B-factors (Å²) per site from first principles:
+Returns the isotropic Debye–Waller B-factors (Å²) per site from first principles:
 B_s(T) = 8π² ⟨u_s^2⟩(T).
 """
 function B_isotropic_from_phonons(model::Model, Φ;
@@ -77,7 +78,12 @@ function B_isotropic_from_phonons(model::Model, Φ;
 end
 
 # Full anisotropic displacement tensors U^{(s)}_{αβ} from phonons (Å^2)
+"""
+   U_from_phonons(model, Φ; T, cryst, qgrid=(12,12,12), q_cell=:primitive, eps_meV=1e-6)
 
+Returns the full anisotropic displacement tensors U^{(s)}_{αβ} from the output of phonons(model,Φ).
+
+"""
 function U_from_phonons(model::Model, Φ;
                         T::Real, cryst, qgrid::NTuple{3,Int}=(12,12,12),
                         q_cell::Symbol=:primitive, eps_meV::Real=1e-6)
@@ -122,7 +128,7 @@ end
     onephonon_dsf(model, Φ, q, Evals; T=300.0, bcoh=nothing, B=nothing, η=0.5, mass_unit=:amu, q_basis=:cart, q_cell=:primitive, cryst=nothing)
 
 Computes one-phonon coherent S(q,E) on energy grid `Evals` (meV).
-- Debye–Waller is intrinsic: full anisotropic tensors U_s(T) are computed from the phonon spectrum (no Θ_D).
+- Debye–Waller is intrinsic: full anisotropic tensors U_s(T) are computed from the phonon spectrum.
 - `bcoh` optional Vector of coherent scattering lengths (length N)
 - `η` Gaussian HWHM for energy broadening (meV)
 - `mass_unit` :amu or :kg (Model.mass is assumed to be :amu typically)
@@ -190,7 +196,7 @@ Compute the one-phonon coherent dynamic structure factor on a **4D grid**:
   - If `q_basis=:cart`, they are Cartesian components (Å⁻¹).
 - `Evals` is the 1D energy axis (meV). Result has shape `(length(q1), length(q2), length(q3), length(Evals))`.
 
-This routine is thread-parallel over the q-grid.
+This routine is thread-parallel over the q-grid to mitigate the O(N^3) complexity.
 """
 function onephonon_dsf_4d(model::Model, Φ,
                           q1::AbstractVector, q2::AbstractVector, q3::AbstractVector,
