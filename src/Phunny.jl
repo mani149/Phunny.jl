@@ -1,5 +1,5 @@
 """
-Extensions for making Sunny.jl usable
+A semi-classical approach to solve for phonon frequencies and eigenmodes, built for integration with Sunny.jl.
 """
 module Phunny
 
