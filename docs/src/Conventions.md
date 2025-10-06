@@ -30,6 +30,13 @@ d = \frac{2\pi}{|\vec{q}_{hk\ell}|}
 ```
 The reciprocal-space vectors are translationally symmetric such that $\vec{q} = \vec{q} + \vec{k}$ 
 for $\vec{k} \in \{\vec{q}_{m}\}$ belonging to the set of reciprocal lattice points.
+# Semi-classical Phonons
+A phonon is defined as the *quanta of vibration*. It is a bosonic (force carrying) excitation 
+between ions within a crystal lattice. The simplest way to represent phonons is using the 
+classical spring system as our model. By Newton's 2nd law, $`\vec{F} = m\ddot{\vec{u}}`$ 
+where $`m`$ is the ionic mass and $`\vec{u}`$ is a finite displacement away from the equilibrium
+position $`\vec{r}^{\text{eq}}`$. The interaction which causes the displacement can be modeled as
+a spring potential between ions $`U = \frac{1}{2}\kappa |\vec{u}|^{2}`$. 
 # Scattering Theory
 The one-phonon dynamic structure factor is the spectral function corresponding to *inelastic* scattering 
 events where the energy transfer $\Delta E \neq 0$. During the inelastic scattering, the neutron either 
