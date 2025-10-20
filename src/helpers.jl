@@ -1,7 +1,6 @@
-# ---------------------------
-# q-space conversion
-# ---------------------------
-
+# --------------------------------------------#
+# q-space conversion ~ (r.l.u.) --> cartesian #
+# --------------------------------------------#
 """
     q_cartesian(cryst, q; basis=:cart, cell=:primitive)
 
@@ -29,12 +28,11 @@ function q_cartesian(cryst, q::SVector{3,Float64}; basis::Symbol=:cart, cell::Sy
         throw(ArgumentError("basis must be :cart or :rlu"))
     end
 end
-
-
-# ---------------------------
-# Neighbor/bond construction
-# ---------------------------
-
+#
+#
+#----------------------------#
+# Neighbor/bond construction #
+#----------------------------#
 """
     neighbor_bonds_cutoff(lattice, fracpos; cutoff, kL, kT, supercell=(1,1,1))
 
@@ -81,8 +79,6 @@ function neighbor_bonds_cutoff(lattice::SMatrix{3,3,Float64,9},
     end
     return [bonds[i] for i in eachindex(bonds) if keep[i]]
 end
-
-
 """
     neighbor_bonds_from_sunny(cryst, bonds; kL=1.0, kT=1.0)
 
@@ -157,90 +153,13 @@ function neighbor_bonds_radius(cryst; cutoff::Real, kL::Union{Real,Function}=1.0
     return neighbor_bonds_from_sunny(cryst, bonds_sunny; kL=kL, kT=kT)
 end
 
-# ---------------------------
-# Force-constant assembly
-# ---------------------------
 
-"""
-    assemble_force_constants!(model)
-
-Builds real-space force constants Φ as a dictionary of 3×3 blocks keyed by (i,j,R).
-Per-bond block: `K = kL*(êêᵀ) + kT*(I - êêᵀ)` with `ê = r0/‖r0‖`, applied to (u_j@R - u_i@0).
-Conservation laws are enforced later by `enforce_asr!`.
-"""
-function assemble_force_constants!(model::Model; β_bend::Real=0.0, bend_shell::Symbol=:nn, bend_tol::Real=0.20)
-Φ = Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}}()
-    I3 = SMatrix{3,3,Float64,9}(I)
-
-    for b in model.bonds
-        ê = b.r0 / norm(b.r0)
-        PL = ê*ê'
-        K  = b.kL*PL + b.kT*(I3 - PL)
-
-        key_ij = (b.i, b.j, b.R)
-        key_ji = (b.j, b.i, -b.R)
-        key_ii = (b.i, b.i, SVector{3,Int}(0,0,0))
-        key_jj = (b.j, b.j, SVector{3,Int}(0,0,0))
-
-        Φ[key_ij] = get(Φ, key_ij, zeros(SMatrix{3,3,Float64,9})) - K
-        Φ[key_ji] = get(Φ, key_ji, zeros(SMatrix{3,3,Float64,9})) - K
-        Φ[key_ii] = get(Φ, key_ii, zeros(SMatrix{3,3,Float64,9})) + K
-        Φ[key_jj] = get(Φ, key_jj, zeros(SMatrix{3,3,Float64,9})) + K
-    end
-
-    return Φ
-end
-
-"""
-    enforce_asr!(Φ, N)
-
-Acoustic sum rule: for each atom i, ∑_{j,R} Φ_{i j}(R) = 0.
-Adjust on-site blocks to satisfy translational invariance.
-"""
-function enforce_asr!(Φ::Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}}, N::Int)
-    for i in 1:N
-        sum_block = zeros(SMatrix{3,3,Float64,9})
-        for ((ii,j,R), blk) in Φ
-            ii == i || continue
-            if !(j == i && R == SVector{3,Int}(0,0,0))
-                sum_block += blk
-            end
-        end
-        key_ii = (i,i,SVector{3,Int}(0,0,0))
-        Φ[key_ii] = -sum_block
-    end
-    return Φ
-end
-
-
-
-"""
-    dynamical_matrix(model, Φ, q_cart)
-
-Mass-weighted dynamical matrix D(q) from real-space Φ blocks.
-`q_cart` is Cartesian (Å⁻¹). Returns Hermitian matrix.
-"""
-function dynamical_matrix(model::Model,
-                          Φ::Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}},
-                          q_cart::SVector{3,Float64})
-    N = model.N
-    D = zeros(ComplexF64, 3N, 3N)
-    M = model.mass
-
-    for ((i,j,R), blk) in Φ
-        r = model.lattice * (model.fracpos[j] .+ SVector{3,Float64}(R) .- model.fracpos[i])
-        phase = cis(dot(q_cart, r))
-        ii = (3(i-1)+1):(3i)
-        jj = (3(j-1)+1):(3j)
-        mw = blk ./ sqrt(M[i]*M[j])
-        @inbounds D[ii, jj] .+= phase .* mw
-    end
-
-    D = (D + D')/2
-    return Hermitian(D)
-end
-
-
+#
+#
+#------------------------------------------------------------------------------------------#
+# Automatic look-up for ionic mass (optional: isotope mass) and coherent scattering length #
+# -----------------------------------------------------------------------------------------#
+#
 # Parse species labels, possibly with isotope mass number (e.g., "Si-29", "O18"), also "D","T"
 function _parse_species_label(x)::Tuple{Symbol,Union{Int,Nothing}}
     s = String(x); s = strip(s)
@@ -309,9 +228,9 @@ function bcoh_lookup(species::AbstractVector; iso_by_site::Dict{Int,Int}=Dict{In
 end
 
 
-# ---------------------------
-# Model construction helpers
-# ---------------------------
+#----------------------------#
+# Model construction helpers #
+#----------------------------#
 
 # Extract Sunny-like information without taking a hard dependency on Sunny.jl.
 @inline function _to_phunny_spec(crystal)
@@ -373,11 +292,21 @@ function build_model(crystal; mass=:lookup, isotopes_by_site=nothing, isotopes_b
     return Model(L, fpos, species, massvec, bonds, length(fpos))
 end
 
+#------------------------------------------------------#
+# make_physical!() ~ returns mass-weighted eigenvector #
+#------------------------------------------------------#
+@inline make_physical!(V,v,m,s) = SVector{3}(V[3(s-1)+1,v], V[3(s-1)+2,v], V[3(s-1)+3,v])/sqrt(m[s])
 
+#-----------------------------------------------------------#
+# longitudinal_weight!() ~ computes longitudinal phonon     #
+# projection using mass-weighted eigenvectors & unit bond   #
+# direction (nhat).					    #
+#-----------------------------------------------------------#
+@inline longitudinal_weight!(V,v,m,s,nhat) = abs2(dot(nhat, make_physical!(V,v,m,s)))
 
-#------------------
-# S(q,w) Reshaping
-#------------------
+#------------------#
+# S(q,w) Reshaping #
+#------------------#
 const AX = (; h=1, k=2, ℓ=3, l=3, ω=4, w=4)
 function collapse(A; over=:ω, op=sum)
 	axes = over isa Tuple ? over : (over,)
@@ -389,9 +318,9 @@ function collapse(A; over=:ω, op=sum)
 end
 
 
-# ---------------------------
-# Utility grids
-# ---------------------------
+#---------------#
+# Utility grids #
+#---------------#
 
 ω_grid(ωmin, ωmax, n) = range(ωmin, ωmax; length=n)
 

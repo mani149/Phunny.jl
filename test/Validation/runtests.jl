@@ -1,4 +1,4 @@
-using LinearAlgebra, StaticArrays, SparseArrays, Phunny, Sunny
+using LinearAlgebra, StaticArrays, SparseArrays, .Phunny, Sunny
 using Test
 
 # Silicon (diamond structure)
@@ -13,17 +13,17 @@ mass  = mass_lookup(Symbol.(types)) 	     # Dict(String=>amu)
 bcoh  = bcoh_lookup(Symbol.(types))           # Vector per site (fm)
 
 # Springs (toy Si-like constants)
-kL = (i,j,rij)->75.0      # eV/Å^2
-kT = (i,j,rij)->27.0
+kL = (i,j,rij)->175.0      # eV/Å^2
+kT = (i,j,rij)->127.0
 
-mdl = build_model(cryst; cutoff=2.6, use_sunny_radius=false,
+mdl = build_model(cryst; cutoff=2*a, use_sunny_radius=false,
                          kL=kL, kT=kT)
 Φ   = assemble_force_constants!(mdl)
 enforce_asr!(Φ, mdl.N)
 
 # 4D DSF grid
-h = collect(range(-2.5, 2.5; length=41))
-k = collect(range(-2.5, 2.5; length=41))
+h = collect(range(-5.5, 5.5; length=101))
+k = collect(range(-5.5, 5.5; length=101))
 l = [0.0]
 E = ω_grid(0.0, 200.0, 401)
 T = 150.0
@@ -37,7 +37,7 @@ S4 = onephonon_dsf_4d(mdl, Φ, h, k, l, E;
 # Unit tests
 @testset "onephonon" begin
 	println()
-	@test size(S4) == (41, 41, 1, 401) 	# 4d
+	@test size(S4) == (101, 101, 1, 401) 	# 4d
 	@test extrema(S4) == (0,0) 			# 4d
 end
 
@@ -53,8 +53,8 @@ end
 	@test mdl.bonds[1].r0 ≈ [1.35775, 1.35775, 1.35775]
 	@test mdl.bonds[1].R ≈ [0, 0, 0]
     @test mdl.lattice ≈ [5.431  0.0    0.0;
-						 0.0    5.431  0.0;
- 						 0.0    0.0    5.431]
+			 0.0    5.431  0.0;
+ 			 0.0    0.0    5.431]
     @test mdl.species == [:Si, :Si]
     @test mdl.N == 2
 end;
@@ -72,3 +72,5 @@ end
 	@test mass ≈ [28.085, 28.085]
 	@test bcoh ≈ [4.1491, 4.1491]
 end
+
+eigvals, eigvecs = phonons(mdl, Φ, @SVector[0.5,0.5,0.5]; q_basis=:cart, q_cell=:primitive)

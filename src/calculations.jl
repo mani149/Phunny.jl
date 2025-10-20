@@ -1,4 +1,235 @@
+#=======================================================================================#
+# This script defines all functions needed to perform numerical calculations using the  # 
+# Phunny module. All necessary inputs are defined self-consistently or can be found in  #
+# the constant.jl script. Optional functional features rely on helpers (helpers.jl).	#
+#											#
+# 	Section 1: Force Constant Matrices, Symmetry Constraints Dynamic Matrix, 	#
+#		   Dynamic Gradient, & Phonon Eigenvalues/Eigenvectors			#
+# 											#
+#	Section 2: Mean-Squared Displacement, (An)Isotropic Debye-Waller Factor, 	#
+#		   One-Phonon Dynamic Structure Factor [Path (2D) | Volume (4D)]	#
+#											#
+#											#
+#							   Author(s): 			#
+#								     `-> Isaac C. Ownby #
+#=======================================================================================#
+#[ Section 1 ]
+#-------------------------#
+# Force-constant assembly #
+#-------------------------#
+"""
+    assemble_force_constants!(model)
 
+Builds real-space force constants Φ as a dictionary of 3×3 blocks keyed by (i,j,R).
+Per-bond block: `K = kL*(êêᵀ) + kT*(I - êêᵀ)` with `ê = r0/‖r0‖`, applied to (u_j@R - u_i@0).
+Conservation laws are enforced later by `enforce_asr!`.
+"""
+function assemble_force_constants!(model::Model; β_bend::Real=0.0, bend_shell::Symbol=:nn, bend_tol::Real=0.20)
+Φ = Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}}()
+    I3 = SMatrix{3,3,Float64,9}(I)
+
+    for b in model.bonds
+        ê = b.r0 / norm(b.r0)
+        PL = ê*ê'
+        K  = b.kL*PL + b.kT*(I3 - PL)
+
+        key_ij = (b.i, b.j, b.R)
+        key_ji = (b.j, b.i, -b.R)
+        key_ii = (b.i, b.i, SVector{3,Int}(0,0,0))
+        key_jj = (b.j, b.j, SVector{3,Int}(0,0,0))
+
+        Φ[key_ij] = get(Φ, key_ij, zeros(SMatrix{3,3,Float64,9})) - K
+        Φ[key_ji] = get(Φ, key_ji, zeros(SMatrix{3,3,Float64,9})) - K
+        Φ[key_ii] = get(Φ, key_ii, zeros(SMatrix{3,3,Float64,9})) + K
+        Φ[key_jj] = get(Φ, key_jj, zeros(SMatrix{3,3,Float64,9})) + K
+    end
+
+    return Φ
+end
+#-------------------#
+# Acoustic Sum Rule #
+#-------------------#
+"""
+    enforce_asr!(Φ, N)
+
+Acoustic sum rule: for each atom i, ∑_{j,R} Φ_{i j}(R) = 0.
+Adjust on-site blocks to satisfy translational invariance.
+"""
+function enforce_asr!(Φ::Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}}, N::Int)
+    for i in 1:N
+        sum_block = zeros(SMatrix{3,3,Float64,9})
+        for ((ii,j,R), blk) in Φ
+            ii == i || continue
+            if !(j == i && R == SVector{3,Int}(0,0,0))
+                sum_block += blk
+            end
+        end
+        key_ii = (i,i,SVector{3,Int}(0,0,0))
+        Φ[key_ii] = -sum_block
+    end
+    return Φ
+end
+#------------------------------#
+# Mass-weighted Dynamic Matrix #
+#------------------------------#
+"""
+    dynamical_matrix(model, Φ, q_cart)
+
+Mass-weighted dynamical matrix D(q) from real-space Φ blocks.
+`q_cart` is Cartesian (Å⁻¹). Returns Hermitian matrix.
+"""
+function dynamical_matrix(model::Model,
+                          Φ::Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}},
+                          q_cart::SVector{3,Float64})
+    N = model.N
+    D = zeros(ComplexF64, 3N, 3N)
+    M = model.mass
+
+    for ((i,j,R), blk) in Φ
+        r = model.lattice * (model.fracpos[j] .+ SVector{3,Float64}(R) .- model.fracpos[i])
+        phase = cis(dot(q_cart, r))
+        ii = (3(i-1)+1):(3i)
+        jj = (3(j-1)+1):(3j)
+        mw = blk ./ sqrt(M[i]*M[j])
+        @inbounds D[ii, jj] .+= phase .* mw
+    end
+
+    D = (D + D')/2
+    return Hermitian(D)
+end
+#--------------------------------#
+# Mass-weighted Dynamic Gradient #
+#--------------------------------#
+"""
+Fills pre-allocated dDx, dDy, dDz (3N×3N ComplexF64) with ∂D/∂q components.
+Arrays are overwritten; no allocation in the hot loop beyond scalars.
+"""
+function dynamical_gradient!(dDx::AbstractMatrix{ComplexF64},
+                             dDy::AbstractMatrix{ComplexF64},
+                             dDz::AbstractMatrix{ComplexF64},
+                             model::Model,
+                             Φ::Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}},
+                             q_cart::SVector{3,Float64})
+    N = model.N
+    M = model.mass
+    fill!(dDx, 0); fill!(dDy, 0); fill!(dDz, 0)
+
+    @inbounds for ((i,j,R), blk) in Φ
+        r = model.lattice * (model.fracpos[j] .+ SVector{3,Float64}(R) .- model.fracpos[i])
+        phase = cis(dot(q_cart, r))
+        ii = (3(i-1)+1):(3i)
+        jj = (3(j-1)+1):(3j)
+        mw = blk ./ sqrt(M[i]*M[j])
+
+        facx = (im * r[1]) * phase
+        facy = (im * r[2]) * phase
+        facz = (im * r[3]) * phase
+
+        dDx[ii, jj] .+= facx .* mw
+        dDy[ii, jj] .+= facy .* mw
+        dDz[ii, jj] .+= facz .* mw
+    end
+
+    # symmetrize
+    dDx .= (dDx .+ dDx') ./ 2
+    dDy .= (dDy .+ dDy') ./ 2
+    dDz .= (dDz .+ dDz') ./ 2
+    return nothing
+end
+#-------------------------------------------#
+# Mass-Weighted Directional Dynamic Hessian #
+#-------------------------------------------#
+"""
+dynamical_hessian!(Hn, model, Φ, nhat; backend=:analytic, h=1e-2)
+
+Fill Hn with the directional Hessian D^{(2)}_{n̂} at Γ (INTERNAL units,
+same mass-weighted basis/units as `dynamical_matrix`).
+
+Backends:
+  :analytic     -- exact in harmonic: one sweep over Φ with factor -(n·r)^2
+  :complexstep  -- high-accuracy numeric using D(ih n) without API changes
+  :FiniteDiff   -- central finite difference of ∂D/∂q along n
+  :AutoDiffHVP  -- not implemented in this draft (placeholder)
+
+Keyword:
+  h::Float64 = 1e-2  -- step size; for :complexstep you can go much smaller
+"""
+function dynamical_hessian!(Hn::AbstractMatrix{ComplexF64},
+                            model::Model,
+                            Φ::Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}},
+                            nhat::SVector{3,Float64};
+                            backend::Symbol = :analytic,
+                            h::Float64 = 1e-2)
+
+    N  = model.N
+    M  = model.mass
+    nh = nhat / norm(nhat)
+    fill!(Hn, 0)
+
+    if backend === :analytic
+        @inbounds for ((i,j,R), blk) in Φ
+            r   = model.lattice * (model.fracpos[j] .+ SVector{3,Float64}(R) .- model.fracpos[i])
+            fac = - (dot(nh, r))^2
+            ii  = (3(i-1)+1):(3i)
+            jj  = (3(j-1)+1):(3j)
+            mw  = blk ./ sqrt(M[i]*M[j])
+            Hn[ii, jj] .+= fac .* mw
+        end
+
+    elseif backend === :complexstep
+        # We cannot call Phunny.dynamical_matrix with complex q (its signature is Float64),
+        # so we reproduce its loop here to evaluate D(q) at q = 0 and q = i*h*nh safely.
+        # Identity: D(ih n) = D(0) + i h D' - (h^2/2) D'' + ...
+        #  => D'' ≈ 2*( D(0) - Re[D(ih n)] ) / h^2
+        N3 = 3N
+        D0  = zeros(ComplexF64, N3, N3)
+        Dim = zeros(ComplexF64, N3, N3)  # D(i h n)
+
+        @inbounds for ((i,j,R), blk) in Φ
+            r      = model.lattice * (model.fracpos[j] .+ SVector{3,Float64}(R) .- model.fracpos[i])
+            ii     = (3(i-1)+1):(3i)
+            jj     = (3(j-1)+1):(3j)
+            mw     = blk ./ sqrt(M[i]*M[j])
+            # q = 0 → phase = 1
+            D0[ii, jj]  .+= mw
+            # q = i h n → phase = exp(i * (i h n·r)) = exp(-h * n·r) (real, positive)
+            th         = -h * dot(nh, r)
+            phase_im   = exp(th)           # real scalar
+            Dim[ii, jj] .+= phase_im .* mw
+        end
+
+        # Symmetrize D0 and Dim (Hermitian numerically)
+        D0  .= (D0  .+ D0') ./ 2
+        Dim .= (Dim .+ Dim') ./ 2
+
+        # Directional Hessian via complex-step identity (no cancellation)
+        Hn .= 2 .* (D0 .- real.(Dim)) ./ (h^2)
+
+    elseif backend === :FiniteDiff
+        # D''_n ≈ ( D'_n(+h) - D'_n(-h) ) / (2h), where D'_n = n·∇D
+        N3   = 3N
+        dDxp = zeros(ComplexF64, N3, N3); dDyp = similar(dDxp); dDzp = similar(dDxp)
+        dDxm = zeros(ComplexF64, N3, N3); dDym = similar(dDxm); dDzm = similar(dDxm)
+        qp   = h .* nh
+        qm   = -h .* nh
+        dynamical_gradient!(dDxp, dDyp, dDzp, model, Φ, qp)
+        dynamical_gradient!(dDxm, dDym, dDzm, model, Φ, qm)
+        @. Hn = ( nh[1]*(dDxp - dDxm) + nh[2]*(dDyp - dDym) + nh[3]*(dDzp - dDzm) ) / (2h)
+
+    elseif backend === :AutoDiffHVP
+        error("AutoDiffHVP backend not implemented in this draft. Try backend=:analytic or :complexstep.")
+
+    else
+        error("Unknown backend = $backend. Use one of: :analytic, :complexstep, :FiniteDiff, :AutoDiffHVP.")
+    end
+
+    # Numeric Hermitian symmetrization
+    Hn .= (Hn .+ Hn') ./ 2
+    return Hn
+end
+#------------------------------------------#
+# Phonon Energy Eigenvalues & Eigenvectors #
+#------------------------------------------#
 """
     phonons(model, Φ, q; q_basis=:cart, q_cell=:primitive, cryst=nothing)
 
@@ -8,9 +239,7 @@ The wavevector `q` may be in Cartesian Å⁻¹ (`q_basis=:cart`) or relative lat
 If passing RLU, also pass the underlying crystal `cryst` via keyword.
 """
 function phonons(model::Model, Φ, q::SVector{3,Float64}; q_basis::Symbol=:cart, q_cell::Symbol=:primitive, cryst=nothing)
-    q_cart = q_basis === :cart ? q :
-             (cryst === nothing ? error("cryst required for q_basis=:rlu") :
-              q_cartesian(cryst, q; basis=:rlu, cell=q_cell))
+    q_cart = q_basis === :cart ? q : (cryst === nothing ? error("cryst required for q_basis=:rlu") : q_cartesian(cryst, q; basis=:rlu, cell=q_cell))
     Dq = dynamical_matrix(model, Φ, q_cart)
     vals, vecs = eigen(Dq)
     ω2 = max.(real(vals), 0.0)
@@ -19,12 +248,10 @@ function phonons(model::Model, Φ, q::SVector{3,Float64}; q_basis::Symbol=:cart,
     perm = sortperm(E)
     return E[perm], vecs[:,perm]
 end
-
-
-# ---------------------------
-# Mean-square displacements & isotropic Debye–Waller from phonons
-# ---------------------------
-
+#[ Section 2 ]
+#-----------------------------------------------------------------#
+#      Mean-square displacements + Debye–Waller from phonons      #
+#-----------------------------------------------------------------#
 """
     msd_from_phonons(model, Φ; T, cryst, qgrid=(12,12,12), q_cell=:primitive, eps_meV=1e-6)
 
@@ -35,7 +262,7 @@ Modes with E ≤ eps_meV are skipped (Γ handling); Convergence may require refi
 """
 function msd_from_phonons(model::Model, Φ;
                           T::Real, cryst, qgrid::NTuple{3,Int}=(12,12,12),
-                          q_cell::Symbol=:primitive, eps_meV::Real=1e-6)
+                          q_cell::Symbol=:primitive, eps_meV::Real=5e-2)
     N = model.N
     nx, ny, nz = qgrid
     Nq = nx*ny*nz
@@ -63,7 +290,9 @@ function msd_from_phonons(model::Model, Φ;
     msd_A2 ./= Nq
     return msd_A2
 end
-
+#----------------------------------------------#
+# Debye-Waller Factor ~ Temperature Dependence # Busted? (Maybe)
+#----------------------------------------------#
 """
     B_isotropic_from_phonons(model, Φ; T, cryst, qgrid=(12,12,12), q_cell=:primitive, eps_meV=1e-6)
 
@@ -76,6 +305,7 @@ function B_isotropic_from_phonons(model::Model, Φ;
     msd = msd_from_phonons(model, Φ; T=T, cryst=cryst, qgrid=qgrid, q_cell=q_cell, eps_meV=eps_meV)
     return (8π^2) .* msd
 end
+<<<<<<< HEAD
 
 # Full anisotropic displacement tensors U^{(s)}_{αβ} from phonons (Å^2)
 """
@@ -84,16 +314,21 @@ end
 Returns the full anisotropic displacement tensors U^{(s)}_{αβ} from the output of phonons(model,Φ).
 
 """
+=======
+#-----------------------------------------------------------------------#
+# Full anisotropic displacement tensors U^{(s)}_{αβ} from phonons (Å^2) #
+#-----------------------------------------------------------------------#
+>>>>>>> ddf086e (Update Phunny.jl Core Functionalities, Add New Tests, Separate Benchmark and Validation Tests)
 function U_from_phonons(model::Model, Φ;
                         T::Real, cryst, qgrid::NTuple{3,Int}=(12,12,12),
-                        q_cell::Symbol=:primitive, eps_meV::Real=1e-6)
+                        q_cell::Symbol=:primitive, eps_meV::Real=2e-1)
     N = model.N
     nx, ny, nz = qgrid
     Nq = nx*ny*nz
     U = [zeros(SMatrix{3,3,Float64,9}) for _ in 1:N]
 
     for iz in 0:nz-1, iy in 0:ny-1, ix in 0:nx-1
-        q_rlu = @SVector[ix/nx, iy/ny, iz/nz]
+        q_rlu = @SVector[(ix+0.5)/nx, (iy+0.5)/ny, (iz+0.5)/nz]
         Eν, Evec = phonons(model, Φ, q_rlu; q_basis=:rlu, q_cell=q_cell, cryst=cryst)
         ν_start = (ix==0 && iy==0 && iz==0) ? 4 : 1
         for ν in ν_start:length(Eν)
@@ -104,28 +339,54 @@ function U_from_phonons(model::Model, Φ;
             for s in 1:N
                 i1 = 3s - 2; i2 = 3s - 1; i3 = 3s
                 e1 = Evec[i1, ν]; e2 = Evec[i2, ν]; e3 = Evec[i3, ν]
-                # physical polarization tensor components: (eα eβ*)/M_s
-                M = model.mass[s]
-                t11 = (e1*conj(e1))/M; t12 = (e1*conj(e2))/M; t13 = (e1*conj(e3))/M
-                t21 = (e2*conj(e1))/M; t22 = (e2*conj(e2))/M; t23 = (e2*conj(e3))/M
-                t31 = (e3*conj(e1))/M; t32 = (e3*conj(e2))/M; t33 = (e3*conj(e3))/M
-                Tmat = @SMatrix [t11 t12 t13; t21 t22 t23; t31 t32 t33]
+                # mass-weighted polarization tensor components: (eα eβ*)
+                t11 = (e1*conj(e1)); t12 = (e1*conj(e2)); t13 = (e1*conj(e3))
+                t21 = (e2*conj(e1)); t22 = (e2*conj(e2)); t23 = (e2*conj(e3))
+                t31 = (e3*conj(e1)); t32 = (e3*conj(e2)); t33 = (e3*conj(e3))
+                Tmat = @SMatrix[t11 t12 t13; t21 t22 t23; t31 t32 t33] ./ model.mass[s]
                 U[s] += (MSD_PREF_A2 * cothx / EmeV) * real.(Tmat)
             end
         end
     end
     for s in 1:N
         U[s] = U[s] ./ Nq
+	U[s] = (U[s] + U[s]')/2
     end
     return U
 end
+#-----------------------------------------#
+# One-phonon coherent DSF (energy in meV) #
+#-----------------------------------------#
 
-# ---------------------------
-# One-phonon coherent DSF (energy in meV)
-# ---------------------------
+# -- internal: resolve coherent scattering lengths (fm) to a length-N vector -- #
+@inline function _resolve_bcoh(
+    model::Model;
+    bcoh=nothing,
+    iso_by_site::Union{Nothing,Dict{Int,Int}}=nothing,
+    iso_by_species::Union{Nothing,Dict{Symbol,Int}}=nothing,
+)::Vector{Float64}
+    N = model.N
+    if bcoh === nothing
+        # Coerce to concrete Dicts to match your bcoh_lookup signature
+        iso_site   = (iso_by_site    === nothing) ? Dict{Int,Int}()        : iso_by_site
+        iso_species= (iso_by_species === nothing) ? Dict{Symbol,Int}()     : iso_by_species
+        try
+            return bcoh_lookup(model.species; iso_by_site=iso_site, iso_by_species=iso_species)
+        catch err
+            @warn "bcoh auto-lookup failed; defaulting to ones(N). Error: $err"
+            return ones(Float64, N)
+        end
+    elseif bcoh isa Number
+        return fill(Float64(bcoh), N)
+    else
+        length(bcoh) == N || error("bcoh must be a scalar or a length-N vector (N=$(N)).")
+        return Float64.(bcoh)
+    end
+end
+
 
 """
-    onephonon_dsf(model, Φ, q, Evals; T=300.0, bcoh=nothing, B=nothing, η=0.5, mass_unit=:amu, q_basis=:cart, q_cell=:primitive, cryst=nothing)
+    onephonon_dsf(model, Φ, q, Evals; T=300.0, bcoh=nothing, η=0.5, mass_unit=:amu, q_basis=:cart, q_cell=:primitive, cryst=nothing)
 
 Computes one-phonon coherent S(q,E) on energy grid `Evals` (meV).
 - Debye–Waller is intrinsic: full anisotropic tensors U_s(T) are computed from the phonon spectrum.
@@ -138,12 +399,14 @@ Returns S(E) (arbitrary but consistent units).
 function onephonon_dsf(model::Model, Φ, q::SVector{3,Float64}, Evals::AbstractVector{<:Real};
                         T::Real=300.0, bcoh=nothing, η::Real=0.5, mass_unit::Symbol=:amu,
                         q_basis::Symbol=:cart, q_cell::Symbol=:primitive, cryst=nothing,
-                        dw_qgrid::NTuple{3,Int}=(12,12,12), _U_internal::Union{Nothing,Vector{SMatrix{3,3,Float64,9}}}=nothing)
+                        dw_qgrid::NTuple{3,Int}=(12,12,12), _U_internal::Union{Nothing,Vector{SMatrix{3,3,Float64,9}}}=nothing,
+			iso_by_site::Union{Nothing,Dict{Int,Int}}=nothing, iso_by_species::Union{Nothing,Dict{Symbol,Int}}=nothing)
     N = model.N
     M = model.mass
     # Use masses in amu regardless of user storage
     Mamu = mass_unit === :amu ? M : mass_unit === :kg ? (M ./ u_to_kg) : error("mass_unit must be :amu or :kg")
-    bw = bcoh === nothing ? ones(N) : bcoh
+    #bw = bcoh === nothing ? ones(N) : bcoh #Old
+    bw = _resolve_bcoh(model;bcoh=bcoh, iso_by_site=iso_by_site, iso_by_species=iso_by_species)
     qvec = q_basis === :cart ? q : q_cartesian(cryst, q; basis=:rlu, cell=q_cell)
     U = _U_internal === nothing ? U_from_phonons(model, Φ; T=T, cryst=cryst, qgrid=dw_qgrid, q_cell=q_cell) : _U_internal
     DW = similar(Mamu)
@@ -151,9 +414,32 @@ function onephonon_dsf(model::Model, Φ, q::SVector{3,Float64}, Evals::AbstractV
         DW[s] = exp(-dot(qvec, U[s]*qvec))
     end
 
-    # Energies in meV from phonons(); eigenvectors are mass-weighted
+    # Solve eigenvalue problem; Energies in meV from phonons(); eigenvectors are mass-weighted
     Eν, Evec = phonons(model, Φ, q; q_basis=q_basis, q_cell=q_cell, cryst=cryst)
+    
+    # Dev. Sanity Check (default: false)
+    PHUNNY_ASSERTS = true
+    if PHUNNY_ASSERTS
+	    m = size(Evec, 2)
+	    #Check (1): Mass-weighted normalization: ||e_nu||^2 = 1
+	    @inbounds for nu in 1:m
+		    n2 = @views real(sum(abs2, Evec[:,nu]))
+		    @assert isapprox(n2, 1.0; rtol=1e-8, atol=1e-12) "Bad eigenvector norm @ mode $nu:$n2"
+	    end
+	    #Check (2): Mass-weighted eigenvectors orthogonality: e' * e = I
+	    if 3N <= 192
+		    G = Hermitian(Evec' * Evec)
+		    @assert isapprox(Matrix(G), I; rtol=1e-8, atol=1e-12) "Evec not orthonormal! ||G - I||^2 =$(opnorm(Matrix(G) - I))"
+	    else
+		    idx = round.(Int, range(1,size(Evec,2); length=min(16,m)))
+		    @inbounds for i in idx, j in idx
+			    g = @views dot(Evec[:,i], Evec[:,j])
+			    @assert isapprox(g, i==j ? 1.0 : 0.0; rtol=1e-8, atol=1e-12) "Orthogonality failure: (i,j)=($i,$j), g=$g"
+		    end
+	    end
+    end
 
+	    
     # Bose factor in meV units
     nB = @. 1/(exp(Eν/(K_B_meV_per_K*T)) - 1)
 
@@ -167,7 +453,7 @@ function onephonon_dsf(model::Model, Φ, q::SVector{3,Float64}, Evals::AbstractV
             # physical polarization
 	    e1 = Evec[i1, ν]; e2 = Evec[i2, ν]; e3 = Evec[i3, ν]
             qdot = abs2(qvec[1]*e1 + qvec[2]*e2 + qvec[3]*e3)
-            proj += (bw[s]^2 * DW[s] * qdot) #/ (2 * Mamu[s] * EmeV)
+            proj += (bw[s]^2 * DW[s] * qdot) / (2 * Mamu[s] * EmeV)
         end
 
         # Gaussian broadened delta in ENERGY domain (meV)
@@ -178,11 +464,9 @@ function onephonon_dsf(model::Model, Φ, q::SVector{3,Float64}, Evals::AbstractV
     end
     return Sω
 end
-
-
-# ---------------------------
-# 4D S(q, w) over a Cartesian or RLU grid
-# ---------------------------
+#-----------------------------------------#
+# 4D S(q, w) over a Cartesian or RLU grid #
+#-----------------------------------------#
 """
     onephonon_dsf_4d(model, Φ, q1, q2, q3, Evals;
                      q_basis=:rlu, q_cell=:primitive, cryst=nothing,
@@ -203,13 +487,19 @@ function onephonon_dsf_4d(model::Model, Φ,
                           Evals::AbstractVector;
                           q_basis::Symbol=:rlu, q_cell::Symbol=:primitive, cryst=nothing,
                           T::Real=300.0, η::Real=0.5, mass_unit::Symbol=:amu, bcoh=nothing,
-                          threads::Bool=true, dw_qgrid::NTuple{3,Int}=(12,12,12))
+                          threads::Bool=true, dw_qgrid::NTuple{3,Int}=(12,12,12),
+			  iso_by_site::Union{Nothing,Dict{Int,Int}}=nothing, 
+			  iso_by_species::Union{Nothing,Dict{Symbol,Int}}=nothing)
 
     n1, n2, n3, nE = length(q1), length(q2), length(q3), length(Evals)
     S4 = zeros(Float64, n1, n2, n3, nE)
 
     # Precompute anisotropic Debye–Waller tensors once (Å^2)
     U = U_from_phonons(model, Φ; T=T, cryst=cryst, qgrid=dw_qgrid, q_cell=q_cell)
+
+    #NEW: resolve bcoh once (thread-safe, read-only, vector) 
+    #Note: onephonon_dsf(...; bcoh=bw) was onephonon_dsf(...; bcoh=bcoh) before automatic look-up
+    bw = _resolve_bcoh(model; bcoh=bcoh, iso_by_site=iso_by_site, iso_by_species=iso_by_species)
 
     # Prepare reciprocal matrix for RLU if needed
     G = nothing
@@ -233,7 +523,7 @@ function onephonon_dsf_4d(model::Model, Φ,
             v = G * SVector{3,Float64}(h,kk,l)
             SVector{3,Float64}(v)
         end
-        Sq = onephonon_dsf(model, Φ, qcart, Evals; T=T, bcoh=bcoh,
+        Sq = onephonon_dsf(model, Φ, qcart, Evals; T=T, bcoh=bw,
                            η=η, mass_unit=mass_unit, q_basis=:cart, cryst=cryst,
                            dw_qgrid=dw_qgrid, _U_internal=U)
         @inbounds S4[i, j, k, :] .= Sq

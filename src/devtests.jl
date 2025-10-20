@@ -1,7 +1,10 @@
-# ---------------------------
-# Validation & sanity checks
-# ---------------------------
-
+#-------------------------------------------#
+# List all available functions in Phunny.jl #
+#-------------------------------------------#
+list_functions() = filter(x->isa(getfield(Phunny, x), Function), names(Phunny; all=true))[21:end]
+# ---------------------------#
+# Validation & sanity checks #
+# ---------------------------#
 # Acoustic sum rule (ASR)
 # Numerical ASR residual on Φ (should be ~0 after enforce_asr!)
 function asr_residual(Φ::Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}}, N::Int)
