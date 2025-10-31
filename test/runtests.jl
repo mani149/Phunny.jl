@@ -1,4 +1,4 @@
-using LinearAlgebra, StaticArrays, SparseArrays, .Phunny, Sunny
+using LinearAlgebra, StaticArrays, SparseArrays, Phunny, Sunny
 using Test
 
 # Silicon (diamond structure)
