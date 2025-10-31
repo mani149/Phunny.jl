@@ -359,7 +359,6 @@ function B_isotropic_from_phonons(model::Model, Φ;
     msd = msd_from_phonons(model, Φ; T=T, cryst=cryst, qgrid=qgrid, q_cell=q_cell, eps_meV=eps_meV)
     return (8π^2) .* msd
 end
-<<<<<<< HEAD
 
 # Full anisotropic displacement tensors U^{(s)}_{αβ} from phonons (Å^2)
 """
@@ -368,11 +367,9 @@ end
 Returns the full anisotropic displacement tensors U^{(s)}_{αβ} from the output of phonons(model,Φ).
 
 """
-=======
 #-----------------------------------------------------------------------#
 # Full anisotropic displacement tensors U^{(s)}_{αβ} from phonons (Å^2) #
 #-----------------------------------------------------------------------#
->>>>>>> ddf086e (Update Phunny.jl Core Functionalities, Add New Tests, Separate Benchmark and Validation Tests)
 function U_from_phonons(model::Model, Φ;
                         T::Real, cryst, qgrid::NTuple{3,Int}=(12,12,12),
                         q_cell::Symbol=:primitive, eps_meV::Real=2e-1)
