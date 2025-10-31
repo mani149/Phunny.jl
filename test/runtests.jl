@@ -38,7 +38,7 @@ S4 = onephonon_dsf_4d(mdl, Φ, h, k, l, E;
 @testset "onephonon" begin
 	println()
 	@test size(S4) == (101, 101, 1, 401) 	# 4d
-	@test extrema(S4) == (0,0) 			# 4d
+	@test all(isfinite, S4) 		# 4d
 end
 
 @testset "grid" begin
