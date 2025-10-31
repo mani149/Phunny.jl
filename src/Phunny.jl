@@ -1,9 +1,6 @@
 """
-<<<<<<< HEAD
 A semi-classical approach to solve for phonon frequencies and eigenmodes, built for integration with Sunny.jl.
-=======
 Extension of Sunny.jl to include phonon analysis.
->>>>>>> ddf086e (Update Phunny.jl Core Functionalities, Add New Tests, Separate Benchmark and Validation Tests)
 """
 module Phunny
 
