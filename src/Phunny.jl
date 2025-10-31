@@ -17,7 +17,8 @@ export Model, Bond, build_model, neighbor_bonds_cutoff, neighbor_bonds_from_sunn
        assemble_force_constants!, enforce_asr!, dynamical_matrix, phonons,
        onephonon_dsf, ω_grid, mass_vector, q_cartesian, onephonon_dsf_4d, collapse,
        mass_lookup, bcoh_lookup, msd_from_phonons, B_isotropic_from_phonons, U_from_phonons,
-       phonons, dynamical_gradient!, dynamical_hessian!, make_physical!, longitudinal_weights!
+       phonons, dynamical_gradient!, dynamical_hessian!, make_physical!, longitudinal_weights!,
+       atomic_index, assign_force_constants!
 
 
 include("constants.jl")
@@ -34,5 +35,13 @@ export list_functions, validate_summary, asr_residual, rigid_translation_residua
 include("devtests.jl")
 include("systests.jl")
 
+
+#-------------------
+# Developer API
+#-------------------
+
+export AutoTargets, fit_per_pair!
+
+include("ForceConstantSearch.jl")
 
 end # module Phunny

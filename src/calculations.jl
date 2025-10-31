@@ -43,7 +43,61 @@ function assemble_force_constants!(model::Model; β_bend::Real=0.0, bend_shell::
         Φ[key_ii] = get(Φ, key_ii, zeros(SMatrix{3,3,Float64,9})) + K
         Φ[key_jj] = get(Φ, key_jj, zeros(SMatrix{3,3,Float64,9})) + K
     end
+    if β_bend > 0
+        @inline function _add!(Φ, key, M)
+            Φ[key] = get(Φ, key, zero(SMatrix{3,3,Float64,9})) + M
+        end
+        neighbor = Dict{Int, Vector{Phunny.Bond{Float64}}}()
+        for b in model.bonds
+            if b.R == SVector{3,Int}(0,0,0) #Same unit cell; generalize if desired
+                push!(get(neighbor, b.i, Phunny.Bond{Float64}[]), b) #neighbors centered about `i`
+                push!(get(neighbor, b.j, Phunny.Bond{Float64}[]), Phunny.Bond{Float64}(b.j,b.i,-b.R,-b.r0,b.kL,b.kT))
+            end
+        end
 
+        for (j, nb) in neighbor
+            L = length(nb); L < 2 && continue
+            dists = [norm(b.r0) for b in nb]; rmin = minimum(dists)
+            sel = if bend_shell == :nn
+                [idx for (idx, d) in enumerate(dists) if d ≤ (1.0 + bend_tol)*rmin]
+            elseif bend_shell == :all
+                eachindex(nb)
+            else 
+                [idx for (idx, d) in enumerate(dists) if d > (1.0 + bend_tol*rmin)] #simple second shell
+            end
+            length(sel) < 2 && continue
+
+            for a = 1:length(sel)-1, b = a+1:length(sel)
+                
+                ba = nb[sel[a]]; bb = nb[sel[b]]; i, k = ba.j, bb.j
+                rji = ba.r0; rjk = bb.r0; ri = norm(rji); rk = norm(rjk)
+                ei = rji/ri; ek = rjk/rk; Pi = I3 - ei*ei'; Pk = I3 - ek*ek'
+
+                Bi = Pi/(ri^2); Bk = Pk/(rk^2) 
+                Rik = (Pi*Pk)/(ri*rk); Rki = Rik'
+
+                key_ii = (i,i,SVector{3,Int}(0,0,0)) 
+                key_jj = (i,i,SVector{3,Int}(0,0,0)) 
+                key_kk = (i,i,SVector{3,Int}(0,0,0))
+                
+                key_ij = (i,i,SVector{3,Int}(0,0,0)); key_ji = (i,i,SVector{3,Int}(0,0,0)) 
+                key_jk = (i,i,SVector{3,Int}(0,0,0)); key_kj = (i,i,SVector{3,Int}(0,0,0))
+                key_ik = (i,i,SVector{3,Int}(0,0,0)); key_ki = (i,i,SVector{3,Int}(0,0,0))
+                
+                _add!(Φ, key_ii, β_bend*Bi)
+                _add!(Φ, key_kk, β_bend*Bk)
+                _add!(Φ, key_jj, β_bend*(Bi + Bk - Rik - Rki))
+
+                _add!(Φ, key_ij, β_bend*(-Bi + Rik))
+                _add!(Φ, key_ji, β_bend*(-Bi + Rki))
+                _add!(Φ, key_jk, β_bend*(-Bk + Rki))
+                _add!(Φ, key_kj, β_bend*(-Nk + Rik))
+
+                _add!(Φ, key_ik, β_bend*(-Rik))
+                _add!(Φ, key_ki, β_bend*(-Rki))
+            end
+        end
+    end
     return Φ
 end
 #-------------------#
@@ -384,6 +438,17 @@ end
     end
 end
 
+# simple erf approximation (Abramowitz–Stegun, good to 1e-7)
+@inline function _erf(x::Float64)
+    # Abramowitz–Stegun 7.1.26
+    a1=0.254829592; a2=-0.284496736; a3=1.421413741
+    a4=-1.453152027; a5=1.061405429; p=0.3275911
+    s = signbit(x) ? -1.0 : 1.0
+    x = abs(x)
+    t = 1.0/(1.0 + p*x)
+    y = 1.0 - (((((a5*t + a4)*t + a3)*t + a2)*t + a1)*t)*exp(-x*x)
+    return s*y
+end
 
 """
     onephonon_dsf(model, Φ, q, Evals; T=300.0, bcoh=nothing, η=0.5, mass_unit=:amu, q_basis=:cart, q_cell=:primitive, cryst=nothing)
@@ -399,13 +464,10 @@ Returns S(E) (arbitrary but consistent units).
 function onephonon_dsf(model::Model, Φ, q::SVector{3,Float64}, Evals::AbstractVector{<:Real};
                         T::Real=300.0, bcoh=nothing, η::Real=0.5, mass_unit::Symbol=:amu,
                         q_basis::Symbol=:cart, q_cell::Symbol=:primitive, cryst=nothing,
-                        dw_qgrid::NTuple{3,Int}=(12,12,12), _U_internal::Union{Nothing,Vector{SMatrix{3,3,Float64,9}}}=nothing,
+                        dw_qgrid::NTuple{3,Int}=(16,16,16), _U_internal::Union{Nothing,Vector{SMatrix{3,3,Float64,9}}}=nothing,
 			iso_by_site::Union{Nothing,Dict{Int,Int}}=nothing, iso_by_species::Union{Nothing,Dict{Symbol,Int}}=nothing)
-    N = model.N
-    M = model.mass
-    # Use masses in amu regardless of user storage
+    N = model.N; M = model.mass
     Mamu = mass_unit === :amu ? M : mass_unit === :kg ? (M ./ u_to_kg) : error("mass_unit must be :amu or :kg")
-    #bw = bcoh === nothing ? ones(N) : bcoh #Old
     bw = _resolve_bcoh(model;bcoh=bcoh, iso_by_site=iso_by_site, iso_by_species=iso_by_species)
     qvec = q_basis === :cart ? q : q_cartesian(cryst, q; basis=:rlu, cell=q_cell)
     U = _U_internal === nothing ? U_from_phonons(model, Φ; T=T, cryst=cryst, qgrid=dw_qgrid, q_cell=q_cell) : _U_internal
@@ -418,7 +480,7 @@ function onephonon_dsf(model::Model, Φ, q::SVector{3,Float64}, Evals::AbstractV
     Eν, Evec = phonons(model, Φ, q; q_basis=q_basis, q_cell=q_cell, cryst=cryst)
     
     # Dev. Sanity Check (default: false)
-    PHUNNY_ASSERTS = true
+    PHUNNY_ASSERTS = false
     if PHUNNY_ASSERTS
 	    m = size(Evec, 2)
 	    #Check (1): Mass-weighted normalization: ||e_nu||^2 = 1
@@ -442,7 +504,8 @@ function onephonon_dsf(model::Model, Φ, q::SVector{3,Float64}, Evals::AbstractV
 	    
     # Bose factor in meV units
     nB = @. 1/(exp(Eν/(K_B_meV_per_K*T)) - 1)
-
+    #Assert that Emin = -1*Emax or 0 (until arbitrary grid normalization is implemented)  
+    Emin, Emax = extrema(Evals); @assert Emin == -Emax || Emin == 0.0 "Minimum Energy MUST be zero or -1*Emax!"
     Sω = zeros(Float64, length(Evals))
     for ν in 1:length(Eν)
         EmeV = Eν[ν]
@@ -455,11 +518,13 @@ function onephonon_dsf(model::Model, Φ, q::SVector{3,Float64}, Evals::AbstractV
             qdot = abs2(qvec[1]*e1 + qvec[2]*e2 + qvec[3]*e3)
             proj += (bw[s]^2 * DW[s] * qdot) / (2 * Mamu[s] * EmeV)
         end
-
+        # Domain-aware normalization per mode (centered at EmeV)
+        ωfrac = 0.5 * (_erf((Emax - EmeV) / (sqrt(2)*η)) - _erf((Emin - EmeV) / (sqrt(2)*η)))  # fraction of +ω Gaussian captured
+        if ωfrac <= 1e-12; continue; end
         # Gaussian broadened delta in ENERGY domain (meV)
         @inbounds @simd for k in eachindex(Evals)
             E = Evals[k]
-            Sω[k] += proj * (nB[ν] + 1) * exp(-((E - EmeV)^2)/(2η^2)) / (sqrt(2π)*η)
+            Sω[k] += proj * (nB[ν] + 1) * exp(-((E - EmeV)^2)/(2η^2)) / (sqrt(2π)*η) / ωfrac
         end
     end
     return Sω
