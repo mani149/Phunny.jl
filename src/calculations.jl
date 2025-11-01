@@ -91,7 +91,7 @@ function assemble_force_constants!(model::Model; β_bend::Real=0.0, bend_shell::
                 _add!(Φ, key_ij, β_bend*(-Bi + Rik))
                 _add!(Φ, key_ji, β_bend*(-Bi + Rki))
                 _add!(Φ, key_jk, β_bend*(-Bk + Rki))
-                _add!(Φ, key_kj, β_bend*(-Nk + Rik))
+                _add!(Φ, key_kj, β_bend*(-Bk + Rik))
 
                 _add!(Φ, key_ik, β_bend*(-Rik))
                 _add!(Φ, key_ki, β_bend*(-Rki))
@@ -463,65 +463,63 @@ function onephonon_dsf(model::Model, Φ, q::SVector{3,Float64}, Evals::AbstractV
                         q_basis::Symbol=:cart, q_cell::Symbol=:primitive, cryst=nothing,
                         dw_qgrid::NTuple{3,Int}=(16,16,16), _U_internal::Union{Nothing,Vector{SMatrix{3,3,Float64,9}}}=nothing,
 			iso_by_site::Union{Nothing,Dict{Int,Int}}=nothing, iso_by_species::Union{Nothing,Dict{Symbol,Int}}=nothing)
+
+    #Number of particles per unit cell & mass
     N = model.N; M = model.mass
+    #Resolve mass units
     Mamu = mass_unit === :amu ? M : mass_unit === :kg ? (M ./ u_to_kg) : error("mass_unit must be :amu or :kg")
+
+    #Automatic lookup for coherent scattering length
     bw = _resolve_bcoh(model;bcoh=bcoh, iso_by_site=iso_by_site, iso_by_species=iso_by_species)
+
+    #Resolve momentum/position units & precompile phase info
     qvec = q_basis === :cart ? q : q_cartesian(cryst, q; basis=:rlu, cell=q_cell)
+    rvec = q_basis === :cart ? [model.lattice*model.fracpos[s] for s in 1:N] : [model.fracpos[s] for s in 1:N]
+    phase = q_basis === :cart ? [exp(im*dot(qvec, rvec[s])) for s in 1:N] : [exp(im*dot(2π*qvec, rvec[s])) for s in 1:N]
+    
+    #Calculate anisotropic Debye-Waller
     U = _U_internal === nothing ? U_from_phonons(model, Φ; T=T, cryst=cryst, qgrid=dw_qgrid, q_cell=q_cell) : _U_internal
-    DW = similar(Mamu)
-    for s in 1:N
-        DW[s] = exp(-dot(qvec, U[s]*qvec))
-    end
+    DW = [exp(-0.5*dot(qvec, U[s]*qvec)) for s in 1:N]
 
     # Solve eigenvalue problem; Energies in meV from phonons(); eigenvectors are mass-weighted
     Eν, Evec = phonons(model, Φ, q; q_basis=q_basis, q_cell=q_cell, cryst=cryst)
-    
-    # Dev. Sanity Check (default: false)
-    PHUNNY_ASSERTS = false
-    if PHUNNY_ASSERTS
-	    m = size(Evec, 2)
-	    #Check (1): Mass-weighted normalization: ||e_nu||^2 = 1
-	    @inbounds for nu in 1:m
-		    n2 = @views real(sum(abs2, Evec[:,nu]))
-		    @assert isapprox(n2, 1.0; rtol=1e-8, atol=1e-12) "Bad eigenvector norm @ mode $nu:$n2"
-	    end
-	    #Check (2): Mass-weighted eigenvectors orthogonality: e' * e = I
-	    if 3N <= 192
-		    G = Hermitian(Evec' * Evec)
-		    @assert isapprox(Matrix(G), I; rtol=1e-8, atol=1e-12) "Evec not orthonormal! ||G - I||^2 =$(opnorm(Matrix(G) - I))"
-	    else
-		    idx = round.(Int, range(1,size(Evec,2); length=min(16,m)))
-		    @inbounds for i in idx, j in idx
-			    g = @views dot(Evec[:,i], Evec[:,j])
-			    @assert isapprox(g, i==j ? 1.0 : 0.0; rtol=1e-8, atol=1e-12) "Orthogonality failure: (i,j)=($i,$j), g=$g"
-		    end
-	    end
-    end
-
-	    
-    # Bose factor in meV units
-    nB = @. 1/(exp(Eν/(K_B_meV_per_K*T)) - 1)
     #Assert that Emin = -1*Emax or 0 (until arbitrary grid normalization is implemented)  
     Emin, Emax = extrema(Evals); @assert Emin == -Emax || Emin == 0.0 "Minimum Energy MUST be zero or -1*Emax!"
+    
+    # Bose factor in meV units
+    nB = @. 1/(exp(Eν/(K_B_meV_per_K*T)) - 1)
+
+    #Dynamic Structure Factor
     Sω = zeros(Float64, length(Evals))
     for ν in 1:length(Eν)
         EmeV = Eν[ν]
         EmeV <= 0 && continue
-        proj = 0.0
+        
+        #Coherent scattering amplitude
+        Aq = 0.0 + 0.0im
         for s in 1:N
             i1 = 3s - 2; i2 = 3s - 1; i3 = 3s
             # physical polarization
 	    e1 = Evec[i1, ν]; e2 = Evec[i2, ν]; e3 = Evec[i3, ν]
-            qdot = abs2(qvec[1]*e1 + qvec[2]*e2 + qvec[3]*e3)
-            proj += (bw[s]^2 * DW[s] * qdot) / (2 * Mamu[s] * EmeV)
+            qdot = qvec[1]*e1 + qvec[2]*e2 + qvec[3]*e3
+            Aq += ( (bw[s] * DW[s] * qdot) / sqrt(2 * Mamu[s] * EmeV) )*phase[s]
         end
-        # Domain-aware normalization per mode (centered at EmeV)
-        ωfrac = 0.5 * (_erf((Emax - EmeV) / (sqrt(2)*η)) - _erf((Emin - EmeV) / (sqrt(2)*η)))  # fraction of +ω Gaussian captured
-        if ωfrac <= 1e-12; continue; end
-        # Gaussian broadened delta in ENERGY domain (meV)
+        #Squared Amplitude (Intensity)
+        Iq = abs2(Aq)
+
+        # Fraction of +ω Gaussian captured
+        ωfracp = 0.5 * (_erf((Emax - EmeV) / (sqrt(2)*η)) - _erf((Emin - EmeV) / (sqrt(2)*η)))
+        # Fraction of -ω Gaussian captured
+        ωfracm = 0.5 * (_erf((Emax + EmeV) / (sqrt(2)*η)) - _erf((Emin + EmeV) / (sqrt(2)*η)))
+
+        #Calculate scattering intensity
+        ωfracp > 1e-12 || continue; np = nB[ν] + 1.0; nm = nB[ν]
         @inbounds @simd for k in eachindex(Evals)
             E = Evals[k]
-            Sω[k] += proj * (nB[ν] + 1) * exp(-((E - EmeV)^2)/(2η^2)) / (sqrt(2π)*η) / ωfrac
+            Sω[k] += Iq * np * exp(-((E - EmeV)^2)/(2η^2)) / (sqrt(2π)*η) / ωfracp
+            if Emin < 0.0 && ωfracm > 1e-12
+                Sω[k] += Iq * nm * exp(-((E + EmeV)^2)/(2η^2)) / (sqrt(2π)*η) / ωfracm
+            end
         end
     end
     return Sω
