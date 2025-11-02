@@ -198,7 +198,7 @@ end
 function bcoh_lookup(species::AbstractVector; iso_by_site::Dict{Int,Int}=Dict{Int,Int}(), iso_by_species::Dict{Symbol,Int}=Dict{Symbol,Int}())
     n = length(species)
     out = Vector{Float64}(undef, n)
-    for s in 1:n
+    @inbounds for s in 1:n
         Zs, A_tag = _parse_species_label(species[s])
         A = haskey(iso_by_site, s) ? iso_by_site[s] :
             (A_tag !== nothing ? A_tag :

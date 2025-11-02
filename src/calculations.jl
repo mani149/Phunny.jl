@@ -6,17 +6,18 @@
 # 	Section 1: Force Constant Matrices, Symmetry Constraints Dynamic Matrix, 	#
 #		   Dynamic Gradient, & Phonon Eigenvalues/Eigenvectors			#
 # 											#
-#	Section 2: Mean-Squared Displacement, (An)Isotropic Debye-Waller Factor, 	#
+#	Section 2: Mean-Squared Displacement, Anisotropic Debye-Waller Factor,   	#
 #		   One-Phonon Dynamic Structure Factor [Path (2D) | Volume (4D)]	#
 #											#
 #											#
 #							   Author(s): 			#
 #								     `-> Isaac C. Ownby #
 #=======================================================================================#
-#[ Section 1 ]
-#-------------------------#
-# Force-constant assembly #
-#-------------------------#
+#----------------------------------------------------------# [ Section 1 ]
+#                                                          #
+#       Interatomic Force-Constant Matrix Assembly         # 
+#                                                          #
+#----------------------------------------------------------#
 """
     assemble_force_constants!(model)
 
@@ -100,9 +101,11 @@ function assemble_force_constants!(model::Model; β_bend::Real=0.0, bend_shell::
     end
     return Φ
 end
-#-------------------#
-# Acoustic Sum Rule #
-#-------------------#
+#-----------------------------------------------#
+#               Acoustic Sum Rule               #
+#                                               #
+# Symmetry Constraint: Translational Invariance #
+#-----------------------------------------------# 
 """
     enforce_asr!(Φ, N)
 
@@ -123,9 +126,11 @@ function enforce_asr!(Φ::Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float6
     end
     return Φ
 end
-#------------------------------#
-# Mass-weighted Dynamic Matrix #
-#------------------------------#
+#----------------------------------------#
+#                                        #
+#       Mass-weighted Dynamic Matrix     #
+#                                        #
+#----------------------------------------#
 """
     dynamical_matrix(model, Φ, q_cart)
 
@@ -281,9 +286,11 @@ function dynamical_hessian!(Hn::AbstractMatrix{ComplexF64},
     Hn .= (Hn .+ Hn') ./ 2
     return Hn
 end
-#------------------------------------------#
-# Phonon Energy Eigenvalues & Eigenvectors #
-#------------------------------------------#
+#--------------------------------------------------------#
+#                                                        #
+#        Phonon Energy Eigenvalues & Eigenvectors        #
+#                                                        #
+#--------------------------------------------------------#
 """
     phonons(model, Φ, q; q_basis=:cart, q_cell=:primitive, cryst=nothing)
 
@@ -302,10 +309,12 @@ function phonons(model::Model, Φ, q::SVector{3,Float64}; q_basis::Symbol=:cart,
     perm = sortperm(E)
     return E[perm], vecs[:,perm]
 end
-#[ Section 2 ]
-#-----------------------------------------------------------------#
-#      Mean-square displacements + Debye–Waller from phonons      #
-#-----------------------------------------------------------------#
+#========================================================================#
+#--------------------------------------------------# [ Section 2 ]
+#                                                  #
+#      Mean-square displacements from phonons      #
+#                                                  #
+#--------------------------------------------------#
 """
     msd_from_phonons(model, Φ; T, cryst, qgrid=(12,12,12), q_cell=:primitive, eps_meV=1e-6)
 
@@ -344,32 +353,17 @@ function msd_from_phonons(model::Model, Φ;
     msd_A2 ./= Nq
     return msd_A2
 end
-#----------------------------------------------#
-# Debye-Waller Factor ~ Temperature Dependence # Busted? (Maybe)
-#----------------------------------------------#
-"""
-    B_isotropic_from_phonons(model, Φ; T, cryst, qgrid=(12,12,12), q_cell=:primitive, eps_meV=1e-6)
-
-Returns the isotropic Debye–Waller B-factors (Å²) per site from first principles:
-B_s(T) = 8π² ⟨u_s^2⟩(T).
-"""
-function B_isotropic_from_phonons(model::Model, Φ;
-                                  T::Real, cryst, qgrid::NTuple{3,Int}=(12,12,12),
-                                  q_cell::Symbol=:primitive, eps_meV::Real=1e-6)
-    msd = msd_from_phonons(model, Φ; T=T, cryst=cryst, qgrid=qgrid, q_cell=q_cell, eps_meV=eps_meV)
-    return (8π^2) .* msd
-end
-
-# Full anisotropic displacement tensors U^{(s)}_{αβ} from phonons (Å^2)
+#-----------------------------------------------------------------------#
+#                                                                       #
+# Full anisotropic displacement tensors U^{(s)}_{αβ} from phonons (Å^2) #
+#                                                                       #
+#-----------------------------------------------------------------------#
 """
    U_from_phonons(model, Φ; T, cryst, qgrid=(12,12,12), q_cell=:primitive, eps_meV=1e-6)
 
 Returns the full anisotropic displacement tensors U^{(s)}_{αβ} from the output of phonons(model,Φ).
 
 """
-#-----------------------------------------------------------------------#
-# Full anisotropic displacement tensors U^{(s)}_{αβ} from phonons (Å^2) #
-#-----------------------------------------------------------------------#
 function U_from_phonons(model::Model, Φ;
                         T::Real, cryst, qgrid::NTuple{3,Int}=(12,12,12),
                         q_cell::Symbol=:primitive, eps_meV::Real=2e-1)
@@ -405,11 +399,22 @@ function U_from_phonons(model::Model, Φ;
     end
     return U
 end
-#-----------------------------------------#
-# One-phonon coherent DSF (energy in meV) #
-#-----------------------------------------#
-
-# -- internal: resolve coherent scattering lengths (fm) to a length-N vector -- #
+#---------------------------------#
+# Internal helpers for one-phonon #
+# coherent DSF calculations       #
+#---------------------------------#
+# simple erf approximation (Abramowitz–Stegun, good to 1e-7)
+@inline function _erf(x::Float64)
+    # Abramowitz–Stegun 7.1.26
+    a1=0.254829592; a2=-0.284496736; a3=1.421413741
+    a4=-1.453152027; a5=1.061405429; p=0.3275911
+    s = signbit(x) ? -1.0 : 1.0
+    x = abs(x)
+    t = 1.0/(1.0 + p*x)
+    y = 1.0 - (((((a5*t + a4)*t + a3)*t + a2)*t + a1)*t)*exp(-x*x)
+    return s*y
+end
+#resolve coherent scattering lengths (fm) to length-N vector
 @inline function _resolve_bcoh(
     model::Model;
     bcoh=nothing,
@@ -434,19 +439,13 @@ end
         return Float64.(bcoh)
     end
 end
-
-# simple erf approximation (Abramowitz–Stegun, good to 1e-7)
-@inline function _erf(x::Float64)
-    # Abramowitz–Stegun 7.1.26
-    a1=0.254829592; a2=-0.284496736; a3=1.421413741
-    a4=-1.453152027; a5=1.061405429; p=0.3275911
-    s = signbit(x) ? -1.0 : 1.0
-    x = abs(x)
-    t = 1.0/(1.0 + p*x)
-    y = 1.0 - (((((a5*t + a4)*t + a3)*t + a2)*t + a1)*t)*exp(-x*x)
-    return s*y
-end
-
+#-------------------------------------------------------#
+#   One-phonon Coherent Dynamic Structure Factor (meV)  #
+#                                                       #
+# q-path dataset ~ onephonon_dsf                        #
+# 4-dim  dataset ~ onephonon_dsf_4d                     #
+#                                                       #
+#-------------------------------------------------------#
 """
     onephonon_dsf(model, Φ, q, Evals; T=300.0, bcoh=nothing, η=0.5, mass_unit=:amu, q_basis=:cart, q_cell=:primitive, cryst=nothing)
 
