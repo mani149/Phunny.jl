@@ -21,9 +21,57 @@
 """
     assemble_force_constants!(model)
 
-Builds real-space force constants Φ as a dictionary of 3×3 blocks keyed by (i,j,R).
-Per-bond block: `K = kL*(êêᵀ) + kT*(I - êêᵀ)` with `ê = r0/‖r0‖`, applied to (u_j@R - u_i@0).
-Conservation laws are enforced later by `enforce_asr!`.
+Builds real-space force constants `Φ` as a dictionary of 3×3 blocks keyed by `(i,j,R)`, where `(i,j)`
+are basis-atoms indices and `R` is a lattice vector in fractional coordinates. This function does
+**not** mutate `model`.
+
+Bond Stretching Block: 
+For each harmonic bond `b` with equilibrium vector `r₀ = b.r0`, longitudinal/tangential stiffness
+`(k_L, k_T) = (b.kL, b.kT)`, and unit direction `̂e = r₀/‖r0‖`; the force constant block is defined,
+`K = kL*(êêᵀ) + kT*(I - êêᵀ)`, applied to the difference in displacements (uⱼ(R) - uᵢ(0)).
+
+Blocks are accumulated:
+    Φ[(i,j,+R)] += -K_b;  Φ[(j,i,-R)] += -K_b
+    Φ[(i,i,0)]  += +K_b;  Φ[(j,j,0)]  += +K_b
+ensuring Newton's third law. 
+
+Types use StaticArrays: 
+        keys → `Tuple{Int, Int, SVector{3,Int}}`
+        vals → `SMatrix{3,3,Float64,9}`
+
+Optional Bond-Angle (bending) Blocks:
+If `β_bend > 0`, additional 3-body contributions are added for triplets `(i,j,k)`, where `j`
+is the angle vertex and neighbors `(i,k)` are selected from same-cell bonds (`R==0`).
+The parameter `bend_shell` determines the bonding scheme:
+    - `:nn`  selects nearest-neighbor bonds with distance ≤ `(1 + bend_tol)*r_min`
+    - `:all` selects all neighbors
+else, a simple "second shell" cut-off is assumed. 
+
+For each pair of neighbors `r_{ji}`, `r_{jk}` with norms `r_i` and `r_k` and directions
+`̂e_i` and `̂e_k`, define two projectors `P_i = I - ̂e_i ̂e_iᵀ` and `P_k = I - ̂e_k ̂e_kᵀ`.
+
+Then, the angular block matrices are defined:
+    B_i  = P_i / r_i²;           B_k = P_k / r_k²
+    R_ik = (P_i P_k)/(r_i r_k);  R_ki = R_ikᵀ
+where each bending contribution scales with `β_bend` and is accumulated into on-site
+and cross blocks among atoms `i, j` and `k` as:
+    Φ[(i,i,0)] += β_bend*B_i
+    Φ[(k,k,0)] += β_bend*B_k
+    Φ[(j,j,0)] += β_bend*(B_i + B_k - R_ik - R_ki)
+
+    Φ[(i,j,0)] += β_bend*(-B_i + R_ik);        Φ[(j,i,0)] += β_bend*(-B_i + R_ki)
+    Φ[(j,k,0)] += β_bend*(-B_k + R_ki);        Φ[(k,j,0)] += β_bend*(-B_k + R_ik)
+    Φ[(i,k,0)] += β_bend*(-R_ik);              Φ[(k,i,0)] += β_bend*(-R_ki)
+
+Conservation laws are **not** enforced here and are enforced later by calling `enforce_asr!(Φ,model)`.
+
+
+Returns
+    - Φ::Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}}
+
+Notes
+    - Units: `k_L`, `k_T`, and `β_bend` must be consistent with displacements in length units.
+    - Symmetry: both `(i,j,R)` and `(j,i,−R)` are filled for pair terms; bending uses `R=0`.
 """
 function assemble_force_constants!(model::Model; β_bend::Real=0.0, bend_shell::Symbol=:nn, bend_tol::Real=0.20)
 Φ = Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}}()
