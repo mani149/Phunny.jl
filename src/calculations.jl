@@ -265,13 +265,18 @@ Fill Hn with the directional Hessian D^{(2)}_{n̂} at Γ (INTERNAL units,
 same mass-weighted basis/units as `dynamical_matrix`).
 
 Backends:
+
   :analytic     -- exact in harmonic: one sweep over Φ with factor -(n·r)^2
   :complexstep  -- high-accuracy numeric using D(ih n) without API changes
   :FiniteDiff   -- central finite difference of ∂D/∂q along n
   :AutoDiffHVP  -- not implemented in this draft (placeholder)
 
 Keyword:
-  h::Float64 = 1e-2  -- step size; for :complexstep you can go much smaller
+
+  h::Float64 = 1e-2  -- step size 
+
+for :complexstep you can go much smaller
+
 """
 function dynamical_hessian!(Hn::AbstractMatrix{ComplexF64},
                             model::Model,
@@ -356,7 +361,9 @@ end
 
 Diagonalizes the mass-weighted dynamic matrix D(q). Returns (eigvals, eigvecs) with **energies in meV** and a 3N×3N 
 block matrix with columns defined by the eigenvectors (phonon polarization vectors).
+
 The wavevector `q` may be in Cartesian Å⁻¹ (`q_basis=:cart`) or relative lattice untis (R.L.U.) (`q_basis=:rlu` with `q_cell=:primitive` or `:conventional`).
+
 If passing RLU, also pass the underlying crystal `cryst` via keyword.
 """
 function phonons(model::Model, Φ, q::SVector{3,Float64}; q_basis::Symbol=:cart, q_cell::Symbol=:primitive, cryst=nothing)
@@ -419,10 +426,43 @@ end
 #                                                                       #
 #-----------------------------------------------------------------------#
 """
-   U_from_phonons(model, Φ; T, cryst, qgrid=(12,12,12), q_cell=:primitive, eps_meV=1e-6)
+    U_from_phonons(model, Φ; T, cryst, qgrid=(12,12,12), q_cell=:primitive, eps_meV=1e-6)
 
-Returns the full anisotropic displacement tensors U^{(s)}_{αβ} from the output of phonons(model,Φ).
+Computes the full anisotropic mean-square displacement tensors `U^(s)_{αβ}` (Å²) from the 
+phonon modes of `phonons(model, Φ, q)` at temperature `T` (K).
 
+Each mode ν at each q contributes
+
+    ΔU⁽ˢ⁾ = MSD_PREF_A2*coth(Eν/(2k_b T))*Re(e_{sν} e_{sν}†)/(MₛEν)
+
+summed over `q, ν` and averaged over `Nq` points.
+
+Sampling:
+
+    - q-grid: centered uniform (Nx × Ny × Nz) r.l.u. grid
+    - Acoustic (ν=1,2,3) Γ modes skipped for stability
+    - Discard modes with `Eν ≤ eps_meV` (default 0.2 meV)
+
+Notes:
+
+    - Eigenvectors are mass-weighted
+    - U⁽ˢ⁾ is symmetrized `(U + Uᵀ)/2`
+    - U⁽ˢ⁾ is averaged over `Nq`
+    - Lacks symmetry weighting
+    - Lacks LO-TO corrections
+
+Units:
+
+    - Energies in meV
+    - Displacements in Å
+    - Masses in amu
+    - `MSD_PREF_A2` in units Å²⋅meV/amu
+
+Returns: 
+
+    `Vector{SMatrix{3,3,Float64,9}}`
+
+one 3×3 matrix per atom.
 """
 function U_from_phonons(model::Model, Φ;
                         T::Real, cryst, qgrid::NTuple{3,Int}=(12,12,12),
