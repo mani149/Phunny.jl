@@ -31,30 +31,39 @@ For each harmonic bond `b` with equilibrium vector `r₀ = b.r0`, longitudinal/t
 `K = kL*(êêᵀ) + kT*(I - êêᵀ)`, applied to the difference in displacements (uⱼ(R) - uᵢ(0)).
 
 Blocks are accumulated:
-    Φ[(i,j,+R)] += -K_b;  Φ[(j,i,-R)] += -K_b
-    Φ[(i,i,0)]  += +K_b;  Φ[(j,j,0)]  += +K_b
+
+    Φ[(i,j,+R)] += -K_b;        Φ[(j,i,-R)] += -K_b
+    Φ[(i,i,0)]  += +K_b;        Φ[(j,j,0)]  += +K_b
+
 ensuring Newton's third law. 
 
 Types use StaticArrays: 
+
         keys → `Tuple{Int, Int, SVector{3,Int}}`
         vals → `SMatrix{3,3,Float64,9}`
 
 Optional Bond-Angle (bending) Blocks:
 If `β_bend > 0`, additional 3-body contributions are added for triplets `(i,j,k)`, where `j`
 is the angle vertex and neighbors `(i,k)` are selected from same-cell bonds (`R==0`).
+
 The parameter `bend_shell` determines the bonding scheme:
+
     - `:nn`  selects nearest-neighbor bonds with distance ≤ `(1 + bend_tol)*r_min`
     - `:all` selects all neighbors
+
 else, a simple "second shell" cut-off is assumed. 
 
-For each pair of neighbors `r_{ji}`, `r_{jk}` with norms `r_i` and `r_k` and directions
-`̂e_i` and `̂e_k`, define two projectors `P_i = I - ̂e_i ̂e_iᵀ` and `P_k = I - ̂e_k ̂e_kᵀ`.
+For each pair of neighbors `rⱼᵢ`, `rⱼₖ` with norms `rᵢ` and `rₖ` and directions
+`̂eᵢ` and `̂eₖ`, define two projectors `Pᵢ = I - ̂eᵢ ̂eᵢᵀ` and `Pₖ = I - ̂eₖ ̂eₖᵀ`.
 
 Then, the angular block matrices are defined:
-    B_i  = P_i / r_i²;           B_k = P_k / r_k²
-    R_ik = (P_i P_k)/(r_i r_k);  R_ki = R_ikᵀ
+
+    Bᵢ  = Pᵢ / rᵢ²;             Bₖ = Pₖ / rₖ²
+    Rᵢₖ = (Pᵢ Pₖ)/(rᵢ rₖ);      Rₖᵢ = Rᵢₖᵀ
+
 where each bending contribution scales with `β_bend` and is accumulated into on-site
 and cross blocks among atoms `i, j` and `k` as:
+
     Φ[(i,i,0)] += β_bend*B_i
     Φ[(k,k,0)] += β_bend*B_k
     Φ[(j,j,0)] += β_bend*(B_i + B_k - R_ik - R_ki)
@@ -67,11 +76,14 @@ Conservation laws are **not** enforced here and are enforced later by calling `e
 
 
 Returns
+
     - Φ::Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}}
 
 Notes
+
     - Units: `k_L`, `k_T`, and `β_bend` must be consistent with displacements in length units.
     - Symmetry: both `(i,j,R)` and `(j,i,−R)` are filled for pair terms; bending uses `R=0`.
+
 """
 function assemble_force_constants!(model::Model; β_bend::Real=0.0, bend_shell::Symbol=:nn, bend_tol::Real=0.20)
 Φ = Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}}()
