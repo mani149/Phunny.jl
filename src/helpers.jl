@@ -313,6 +313,12 @@ end
 #------------------------------------------------------#
 # atomic_index() ~ maps index to atomic label	       #
 #------------------------------------------------------#
+"""
+    atomic_index(labels::Vector{String})
+
+Takes in atomic labels (e.g. ["Cu", "O"]) and outputs a dictionary 
+which maps atomic index to atomic label (e.g. [1 => :Cu, 2 => :O])
+"""
 @inline atomic_index(labels) = Dict(i => Symbol(labels[i]) for i in eachindex(labels))
 
 
@@ -332,7 +338,14 @@ end
 # S(q,w) Reshaping #
 #------------------#
 const AX = (; h=1, k=2, ℓ=3, l=3, ω=4, w=4)
+"""
+    collapse(A::AbstractArray; over::Symbol, op::Function)
 
+Collapse (reduce) a 4D array `A` over one or more axes with specified operation (default operation is `sum`).
+Axes may be symbols (:h,:k,:ℓ,:ω) [Julia Syntax] or integer indices [Python Syntax].
+
+Reduces highest axes first to keep indices stable. Returns collapsed (reduced) array.
+"""
 function collapse(A; over=:ω, op=sum)
 	axes = over isa Tuple ? over : (over,)
 	idxs = sort!(map(x -> x isa Symbol ? AX[x] : Int(x), collect(axes)))

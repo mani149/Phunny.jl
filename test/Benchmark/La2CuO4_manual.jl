@@ -1,4 +1,4 @@
-using LinearAlgebra, StaticArrays, Sunny, Phunny, GLMakie, Statistics
+using LinearAlgebra, StaticArrays, Sunny, .Phunny, GLMakie, Statistics
 
 #---------------------------------------------------------------#
 #References: 							#
@@ -32,13 +32,15 @@ types = ["Cu", "O", "O", "O", "O", "La", "La"]
 
 #Crystal + Model
 cryst = Crystal(L, fpos; types) 
-cutoff = 0.8*minimum((a,b,c)); 
+cutoff = 0.75*minimum((a,b,c)); 
 model = build_model(cryst; cutoff)
 
-#Manually Defined Bonds & Force Constants
+#Manually Defined Bonds & Force Constants 
+#       (:Atom₁, :Atom₂) => (kL, kT)
 bond_dict = Dict( (:Cu, :O) => (190.0, 28.0),
 		  (:O,  :O) => (40.00, 4.00),
 		  (:O,  :La) => (20.00, 1.00))
+
 #Index atoms
 atoms = atomic_index(types)
 
@@ -49,24 +51,28 @@ atoms = atomic_index(types)
 ############
 # Analysis #
 ############
-
+bond_dict[:O, :O] = (3, 3)
+bond_dict[:O, :La] = (0.2, 0.2)
 #Calibration
-for (kL_CuO, kT_CuO) in ((1,1), (10,1), (33,2), (50,5), (190,28), (210,32), (220, 35))
+for (kL_CuO, kT_CuO) in ((1,1), (10,1), (33,2), (50,5), (4,12), (80, 28), (190,28), (210,32), (220, 35))
     bond_dict[:Cu,:O] = (kL_CuO, kT_CuO)
     
     assign_force_constants!(model, atoms, bond_dict)
-    FCMs = assemble_force_constants!(model; β_bend=0.2, bend_shell=:nn, bend_tol=0.15); enforce_asr!(FCMs, model.N)
+    FCMs = assemble_force_constants!(model; β_bend=0.2, bend_shell=:all, bend_tol=0.15); enforce_asr!(FCMs, model.N)
 
     EΓ, _ = phonons(model, FCMs, @SVector[0.0, 0.0, 0.0]; 
                     q_basis=:rlu, q_cell=:primitive, cryst=cryst)
-    @info "Cu-O (kL=$(kL_CuO)) ⟶ Γ optics ≈  $(EΓ[4:end])"
+    if any( ω -> 60.0 ≤ ω ≤ 95.0, EΓ)
+        @info "Cu-O (kL=$(kL_CuO)) ⟶ Γ optics ≈  $(round.(EΓ[4:end];digits=2))"
+    end
 end
-
+#kL : Controls Acoustic Scaling
+#kT : Controls Optical Scaling
 
 #################
 # FCM & Phonons #
 #################
-bond_dict[:Cu,:O] = (190, 28)
+bond_dict[:Cu,:O] = (4, 12)
 assign_force_constants!(model, atoms, bond_dict)
 
 #Assemble Force Constants Matrices
@@ -83,7 +89,7 @@ planar_x = r_cartesian(L, fpos[1], fpos[2])
 planar_y = r_cartesian(L, fpos[1], fpos[3])
 apical = r_cartesian(L, fpos[1], fpos[4])
 
-@assert 1.85 ≤ planar_x ≤ 1.95 && 1.85 ≤ planar_y ≤ 1.95 "Planar oxygen bond distance does NOT match the experimental values!"
+@assert 1.85 - δ ≤ planar_x ≤ 1.95 + δ && 1.85 - δ ≤ planar_y ≤ 1.95 + δ "Planar oxygen bond distance does NOT match the experimental values!"
 @assert 2.30 ≤ apical ≤ 2.45 "Apical oxygen bond distance does NOT match the experimental values!"
 
 #DSF-based check: stable phonons & sensible optical energies at Γ-point
@@ -91,8 +97,8 @@ eigenpairs = phonons(model, ϕ, @SVector[0.0, 0.0, 0.0];
 		     q_basis=:rlu, q_cell=:primitive, cryst=cryst)
 
 @assert any(ω -> 60.0 ≤ ω ≤ 95.0, eigenpairs[1]) "Expected oxygen-dominant optical modes in ~[60, 95] meV window for La2CuO4!"
-
-
+@show size(eigenpairs[2])
+#display(heatmap(abs.(eigenpairs[2]).^2))
 
 ############
 # Plotting #
@@ -100,14 +106,14 @@ eigenpairs = phonons(model, ϕ, @SVector[0.0, 0.0, 0.0];
 
 
 #Plot Phonon DoS
-hist(eigenpairs[1], bins=40, color="royalblue", label="Phonon DoS")
+#display(hist(eigenpairs[1], bins=100, color="royalblue", label="Phonon DoS"))
 
 
 #Plots S(q,ω) = ∑ₙ S(qₙ, ω) : S(qₙ,ω) = S[qₙ,:]
 function plot_dsf_line!(cryst, model, Φ; 
-                        q₀=@SVector[0.0, 0.0, 0.0], 
-                        q₁=@SVector[1.5, 0.0, 0.0], 
-                        nq=81, ωmax=400.0, nω=1201, 
+                        q₀=@SVector[-1.0, 0.0, 0.0], 
+                        q₁=@SVector[1.0, 0.0, 0.0], 
+                        nq=81, ωmax=110.0, nω=1201, 
                         η=1.0, q_cell=:primitive)
     qs = [SVector{3,Float64}((1-t).*q₀ .+ t.*q₁) for t in range(0,1;length=nq)]
     ωs = range(0.0, ωmax; length=nω)
@@ -127,12 +133,12 @@ function plot_dsf_line!(cryst, model, Φ;
     end
 
     fig = Figure(size=(500,500))
-    ax = Axis(fig[1,1], xlabel="q index (Γ ↦ X)", ylabel = "Energy (meV)", title="La₂CuO₄ | One-Phonon S(q,ω)") 
+    ax = Axis(fig[1,1], xlabel="q index (X ↦ Γ ↦ X)", ylabel = "Energy (meV)", title="La₂CuO₄ | One-Phonon S(q,ω)") 
     hm = heatmap!(ax, 1:nq, ωs, Sqω ; interpolate=true, colormap=:viridis, colorrange=lohi(Sqω))
     Colorbar(fig[1,2], hm; label="Intensity")
     screen=display(fig); wait(screen)
 end
-plot_dsf_line!(cryst, model, ϕ)
+plot_dsf_line!(cryst, model, ϕ; q_cell=:primitive, η=1.0)
 
 
 

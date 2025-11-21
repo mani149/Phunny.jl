@@ -259,7 +259,7 @@ end
 # Mass-Weighted Directional Dynamic Hessian #
 #-------------------------------------------#
 """
-dynamical_hessian!(Hn, model, Φ, nhat; backend=:analytic, h=1e-2)
+    dynamical_hessian!(Hn, model, Φ, nhat; backend=:analytic, h=1e-2)
 
 Fill Hn with the directional Hessian D^{(2)}_{n̂} at Γ (INTERNAL units,
 same mass-weighted basis/units as `dynamical_matrix`).
@@ -360,7 +360,7 @@ end
     phonons(model, Φ, q; q_basis=:cart, q_cell=:primitive, cryst=nothing)
 
 Diagonalizes the mass-weighted dynamic matrix D(q). Returns (eigvals, eigvecs) with **energies in meV** and a 3N×3N 
-block matrix with columns defined by the eigenvectors (phonon polarization vectors).
+block matrix with columns defined by the mass-weighted eigenvectors (phonon polarization vectors).
 
 The wavevector `q` may be in Cartesian Å⁻¹ (`q_basis=:cart`) or relative lattice untis (R.L.U.) (`q_basis=:rlu` with `q_cell=:primitive` or `:conventional`).
 
@@ -409,10 +409,10 @@ function msd_from_phonons(model::Model, Φ;
             cothx = 1.0 / tanh(x)
             for s in 1:N
                 i1 = 3s - 2; i2 = 3s - 1; i3 = 3s
-                #Eigenvector components (not mass-weighted)
+                #Mass-weighted igenvector components
                 e1 = Evec[i1, ν]; e2 = Evec[i2, ν]; e3 = Evec[i3, ν]
                 #Mass-weighted square amplitude
-                amp2 = (abs2(e1) + abs2(e2) + abs2(e3)) / model.mass[s]
+                amp2 = (abs2(e1) + abs2(e2) + abs2(e3)) #/ model.mass[s]
                 #Mean-square Displacement
                 msd_A2[s] += MSD_PREF_A2 * cothx * amp2 / EmeV
             end
@@ -490,7 +490,7 @@ function U_from_phonons(model::Model, Φ;
                 t21 = (e2*conj(e1)); t22 = (e2*conj(e2)); t23 = (e2*conj(e3))
                 t31 = (e3*conj(e1)); t32 = (e3*conj(e2)); t33 = (e3*conj(e3))
                 #Mass-weighted polarization tensor
-                Tmat = @SMatrix[t11 t12 t13; t21 t22 t23; t31 t32 t33] ./ model.mass[s]
+                Tmat = @SMatrix[t11 t12 t13; t21 t22 t23; t31 t32 t33] #./ model.mass[s]
                 U[s] += (MSD_PREF_A2 * cothx / EmeV) * real.(Tmat)
             end
         end
@@ -601,10 +601,10 @@ function onephonon_dsf(model::Model, Φ, q::SVector{3,Float64}, Evals::AbstractV
         Aq = 0.0 + 0.0im
         for s in 1:N
             i1 = 3s - 2; i2 = 3s - 1; i3 = 3s
-            # physical polarization
+            # mass-weighted polarization
 	    e1 = Evec[i1, ν]; e2 = Evec[i2, ν]; e3 = Evec[i3, ν]
             qdot = qvec[1]*e1 + qvec[2]*e2 + qvec[3]*e3
-            Aq += ( (bw[s] * DW[s] * qdot) / sqrt(2 * Mamu[s] * EmeV) )*phase[s]
+            Aq += ( (bw[s] * DW[s] * qdot) / sqrt(2*EmeV))*phase[s]#sqrt(2 * Mamu[s] * EmeV) )*phase[s]
         end
         #Squared Amplitude (Intensity)
         Iq = abs2(Aq)
