@@ -86,7 +86,7 @@ Notes
 
 """
 function assemble_force_constants!(model::Model; β_bend::Real=0.0, bend_shell::Symbol=:nn, bend_tol::Real=0.20)
-Φ = Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}}()
+    Φ = Dict{Tuple{Int,Int,SVector{3,Int}}, SMatrix{3,3,Float64,9}}()
     I3 = SMatrix{3,3,Float64,9}(I)
 
     for b in model.bonds

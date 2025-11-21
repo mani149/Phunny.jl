@@ -1,4 +1,4 @@
-using LinearAlgebra, StaticArrays, Sunny, .Phunny, GLMakie, Statistics
+using LinearAlgebra, StaticArrays, Sunny, Phunny, GLMakie, Statistics
 
 #---------------------------------------------------------------#
 #References: 							#
