@@ -10,11 +10,11 @@ Base.:(==)(a::BondClass,b::BondClass) = a.species==b.species && a.shell==b.shell
 Base.hash(b::BondClass,h::UInt) = hash(b.species, hash(b.shell, hash(b.orient,h)))
 
 # --- classify bonds present in the model -------------------------------------
-"""
-Return:
- - classes::Dict{BondClass,Vector{Int}} mapping each class to model.edge indices
- - clist::Vector{BondClass} stable ordering of classes
-"""
+#
+#Return:
+# - classes::Dict{BondClass,Vector{Int}} mapping each class to model.edge indices
+# - clist::Vector{BondClass} stable ordering of classes
+#
 function bond_classes(model; c_axis::SVector{3,Float64}=@SVector[0.0,0.0,1.0], planar_tol::Float64=0.25)
     # first pass: collect distances by (species-pair, orient)
     bykey = Dict{Tuple{NTuple{2,Symbol},Symbol}, Vector{Tuple{Int,Float64}}}() # (bond_index, r)
@@ -46,11 +46,11 @@ function bond_classes(model; c_axis::SVector{3,Float64}=@SVector[0.0,0.0,1.0], p
 end
 
 # --- seeding heuristics (no user input needed) --------------------------------
-"""
-Seed (kL,kT) per bond class using geometry:
- kL ∝ 1/r^3 with species-dependent prefactor; kT = γ*kL with γ by orient.
-Returns Vector θ of length 2*nc storing log-parameters to enforce positivity: k = exp(θ).
-"""
+#
+#Seed (kL,kT) per bond class using geometry:
+# kL ∝ 1/r^3 with species-dependent prefactor; kT = γ*kL with γ by orient.
+#Returns Vector θ of length 2*nc storing log-parameters to enforce positivity: k = exp(θ).
+#
 function seed_params(model, classes, clist; α=Dict{Tuple{Symbol,Symbol},Float64}(),
                      γ_planar=0.15, γ_apical=0.05, γ_other=0.10)
     default_α(sp) = get(α, sp, 50.0)
@@ -70,10 +70,10 @@ function seed_params(model, classes, clist; α=Dict{Tuple{Symbol,Symbol},Float64
 end
 
 # --- inject per-class parameters into the model FCM ---------------------------
-"""
-Write kL,kT from θ into all edges of each class, then assemble FCMs.
-Calls enforce_asr! to satisfy translational invariance.
-"""
+#
+#Write kL,kT from θ into all edges of each class, then assemble FCMs.
+#Calls enforce_asr! to satisfy translational invariance.
+#
 function update_fcm!(θ, model, classes, clist)
     @inbounds for (k, key) in enumerate(clist)
         kL = exp(θ[2k-1]); kT = exp(θ[2k])
@@ -140,10 +140,10 @@ function jacobian!(J, θ, model, classes, clist, cell, targets; epsθ=1e-3)
 end
 
 # --- Gauss–Newton with damping (no extra deps) --------------------------------
-"""
-Fit per-class (kL,kT) to supplied targets. If no targets are given, this returns seeded values.
-Regularization λ discourages extreme k ratios.
-"""
+#"""
+#Fit per-class (kL,kT) to supplied targets. If no targets are given, this returns seeded values.
+#Regularization λ discourages extreme k ratios.
+#"""
 function fit_per_pair!(model, cell; targets::Union{Nothing,AutoTargets}=nothing,
                        planar_tol=0.25, λ=1e-4, maxiter=60)
     classes, clist = bond_classes(model; planar_tol)

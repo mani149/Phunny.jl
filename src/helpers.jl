@@ -293,6 +293,9 @@ function build_model(crystal; mass=:lookup, isotopes_by_site=nothing, isotopes_b
 end
 
 
+#From here down is exploratory
+
+#I think this one works as intended
 function assign_force_constants!(model::Model, atom::Dict{Int,Symbol},
 				 bonds::Dict{Tuple{Symbol,Symbol},Tuple{Float64,Float64}})
 	@inline canonical!(s1,s2) = s1 <= s2 ? (atom[s1], atom[s2]) : (atom[s2], atom[s1])
@@ -311,6 +314,8 @@ end
 # atomic_index() ~ maps index to atomic label	       #
 #------------------------------------------------------#
 @inline atomic_index(labels) = Dict(i => Symbol(labels[i]) for i in eachindex(labels))
+
+
 #------------------------------------------------------#
 # make_physical!() ~ returns mass-weighted eigenvector #
 #------------------------------------------------------#
@@ -327,6 +332,7 @@ end
 # S(q,w) Reshaping #
 #------------------#
 const AX = (; h=1, k=2, ℓ=3, l=3, ω=4, w=4)
+
 function collapse(A; over=:ω, op=sum)
 	axes = over isa Tuple ? over : (over,)
 	idxs = sort!(map(x -> x isa Symbol ? AX[x] : Int(x), collect(axes)))

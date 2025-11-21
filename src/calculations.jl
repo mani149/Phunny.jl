@@ -409,14 +409,15 @@ function msd_from_phonons(model::Model, Φ;
             cothx = 1.0 / tanh(x)
             for s in 1:N
                 i1 = 3s - 2; i2 = 3s - 1; i3 = 3s
-                # mass-weighted eigenvector components
+                #Eigenvector components (not mass-weighted)
                 e1 = Evec[i1, ν]; e2 = Evec[i2, ν]; e3 = Evec[i3, ν]
-                amp2 = (abs2(e1) + abs2(e2) + abs2(e3)) / model.mass[s]  # |e_phys|^2 sum
+                #Mass-weighted square amplitude
+                amp2 = (abs2(e1) + abs2(e2) + abs2(e3)) / model.mass[s]
+                #Mean-square Displacement
                 msd_A2[s] += MSD_PREF_A2 * cothx * amp2 / EmeV
             end
         end
     end
-
     msd_A2 ./= Nq
     return msd_A2
 end
@@ -473,7 +474,7 @@ function U_from_phonons(model::Model, Φ;
     U = [zeros(SMatrix{3,3,Float64,9}) for _ in 1:N]
 
     for iz in 0:nz-1, iy in 0:ny-1, ix in 0:nx-1
-        q_rlu = @SVector[(ix+0.5)/nx, (iy+0.5)/ny, (iz+0.5)/nz]
+        q_rlu = @SVector[(ix+0.5)/nx, (iy+0.5)/ny, (iz+0.5)/nz] #center-shifted
         Eν, Evec = phonons(model, Φ, q_rlu; q_basis=:rlu, q_cell=q_cell, cryst=cryst)
         ν_start = (ix==0 && iy==0 && iz==0) ? 4 : 1
         for ν in ν_start:length(Eν)
@@ -484,15 +485,16 @@ function U_from_phonons(model::Model, Φ;
             for s in 1:N
                 i1 = 3s - 2; i2 = 3s - 1; i3 = 3s
                 e1 = Evec[i1, ν]; e2 = Evec[i2, ν]; e3 = Evec[i3, ν]
-                # mass-weighted polarization tensor components: (eα eβ*)
+                #Polarization tensor components: (eα eβ*)
                 t11 = (e1*conj(e1)); t12 = (e1*conj(e2)); t13 = (e1*conj(e3))
                 t21 = (e2*conj(e1)); t22 = (e2*conj(e2)); t23 = (e2*conj(e3))
                 t31 = (e3*conj(e1)); t32 = (e3*conj(e2)); t33 = (e3*conj(e3))
+                #Mass-weighted polarization tensor
                 Tmat = @SMatrix[t11 t12 t13; t21 t22 t23; t31 t32 t33] ./ model.mass[s]
                 U[s] += (MSD_PREF_A2 * cothx / EmeV) * real.(Tmat)
             end
         end
-    end
+    end#Ensure U is symmetric and normalized
     for s in 1:N
         U[s] = U[s] ./ Nq
 	U[s] = (U[s] + U[s]')/2
@@ -565,6 +567,7 @@ function onephonon_dsf(model::Model, Φ, q::SVector{3,Float64}, Evals::AbstractV
 
     #Number of particles per unit cell & mass
     N = model.N; M = model.mass
+
     #Resolve mass units
     Mamu = mass_unit === :amu ? M : mass_unit === :kg ? (M ./ u_to_kg) : error("mass_unit must be :amu or :kg")
 
