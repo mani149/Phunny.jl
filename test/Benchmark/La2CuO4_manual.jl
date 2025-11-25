@@ -1,4 +1,4 @@
-using LinearAlgebra, StaticArrays, Sunny, .Phunny, GLMakie, Statistics
+using LinearAlgebra, StaticArrays, Sunny, Phunny, GLMakie, Statistics
 
 #---------------------------------------------------------------#
 #References: 							#
@@ -106,7 +106,7 @@ eigenpairs = phonons(model, ϕ, @SVector[0.0, 0.0, 0.0];
 
 
 #Plot Phonon DoS
-#display(hist(eigenpairs[1], bins=100, color="royalblue", label="Phonon DoS"))
+#display(hist(eigenpairs[1], bins=20, color="royalblue", label="Phonon DoS"))
 
 
 #Plots S(q,ω) = ∑ₙ S(qₙ, ω) : S(qₙ,ω) = S[qₙ,:]
@@ -134,7 +134,7 @@ function plot_dsf_line!(cryst, model, Φ;
 
     fig = Figure(size=(500,500))
     ax = Axis(fig[1,1], xlabel="q index (X ↦ Γ ↦ X)", ylabel = "Energy (meV)", title="La₂CuO₄ | One-Phonon S(q,ω)") 
-    hm = heatmap!(ax, 1:nq, ωs, Sqω ; interpolate=true, colormap=:viridis, colorrange=lohi(Sqω))
+    hm = heatmap!(ax, 1:nq, ωs, Sqω ; interpolate=true, colormap=:viridis, colorrange=(0,0.3))#lohi(Sqω))
     Colorbar(fig[1,2], hm; label="Intensity")
     screen=display(fig); wait(screen)
 end
