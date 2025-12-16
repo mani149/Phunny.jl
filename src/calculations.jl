@@ -111,8 +111,13 @@ function assemble_force_constants!(model::Model; β_bend::Real=0.0, bend_shell::
         neighbor = Dict{Int, Vector{Phunny.Bond{Float64}}}()
         for b in model.bonds
             if b.R == SVector{3,Int}(0,0,0) #Same unit cell; generalize if desired
-                push!(get(neighbor, b.i, Phunny.Bond{Float64}[]), b) #neighbors centered about `i`
-                push!(get(neighbor, b.j, Phunny.Bond{Float64}[]), Phunny.Bond{Float64}(b.j,b.i,-b.R,-b.r0,b.kL,b.kT))
+                neighbor[b.i] = get(neighbor, b.i, Phunny.Bond{Float64}[])
+                neighbor[b.j] = get(neighbor, b.j, Phunny.Bond{Float64}[])
+                #push!(get(neighbor, b.i, Phunny.Bond{Float64}[]), b) #neighbors centered about `i`
+                #push!(get(neighbor, b.j, Phunny.Bond{Float64}[]), Phunny.Bond{Float64}(b.j,b.i,-b.R,-b.r0,b.kL,b.kT))
+                if b.i != b.j
+                    push!(neighbor[b.i], b); push!(neighbor[b.j], Phunny.Bond{Float64}(b.j,b.i,-b.R,-b.r0,b.kL,b.kT))
+                end
             end
         end
 
@@ -124,7 +129,7 @@ function assemble_force_constants!(model::Model; β_bend::Real=0.0, bend_shell::
             elseif bend_shell == :all
                 eachindex(nb)
             else 
-                [idx for (idx, d) in enumerate(dists) if d > (1.0 + bend_tol*rmin)] #simple second shell
+                [idx for (idx, d) in enumerate(dists) if d > (1.0 + bend_tol)*rmin] #simple second shell
             end
             length(sel) < 2 && continue
 
@@ -138,12 +143,12 @@ function assemble_force_constants!(model::Model; β_bend::Real=0.0, bend_shell::
                 Rik = (Pi*Pk)/(ri*rk); Rki = Rik'
 
                 key_ii = (i,i,SVector{3,Int}(0,0,0)) 
-                key_jj = (i,i,SVector{3,Int}(0,0,0)) 
-                key_kk = (i,i,SVector{3,Int}(0,0,0))
+                key_jj = (j,j,SVector{3,Int}(0,0,0)) 
+                key_kk = (k,k,SVector{3,Int}(0,0,0))
                 
-                key_ij = (i,i,SVector{3,Int}(0,0,0)); key_ji = (i,i,SVector{3,Int}(0,0,0)) 
-                key_jk = (i,i,SVector{3,Int}(0,0,0)); key_kj = (i,i,SVector{3,Int}(0,0,0))
-                key_ik = (i,i,SVector{3,Int}(0,0,0)); key_ki = (i,i,SVector{3,Int}(0,0,0))
+                key_ij = (i,j,SVector{3,Int}(0,0,0)); key_ji = (j,i,SVector{3,Int}(0,0,0)) 
+                key_jk = (j,k,SVector{3,Int}(0,0,0)); key_kj = (k,j,SVector{3,Int}(0,0,0))
+                key_ik = (i,k,SVector{3,Int}(0,0,0)); key_ki = (k,i,SVector{3,Int}(0,0,0))
                 
                 _add!(Φ, key_ii, β_bend*Bi)
                 _add!(Φ, key_kk, β_bend*Bk)
