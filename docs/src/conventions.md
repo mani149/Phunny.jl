@@ -1,3 +1,7 @@
+```@meta
+CurrentModule=Phunny
+```
+
 # Crystal Lattices
 In general, a 3-dimensional crystal is defined using a *Bravais lattice*. 
 The Bravais lattice is defined by three primitive vectors $`\vec{a}_{1}`$, $`\vec{a}_{2}`$, and $`\vec{a}_{3}`$. 
