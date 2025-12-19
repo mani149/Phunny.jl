@@ -110,14 +110,10 @@ function assemble_force_constants!(model::Model; β_bend::Real=0.0, bend_shell::
         end
         neighbor = Dict{Int, Vector{Phunny.Bond{Float64}}}()
         for b in model.bonds
-            if b.R == SVector{3,Int}(0,0,0) #Same unit cell; generalize if desired
-                neighbor[b.i] = get(neighbor, b.i, Phunny.Bond{Float64}[])
-                neighbor[b.j] = get(neighbor, b.j, Phunny.Bond{Float64}[])
-                #push!(get(neighbor, b.i, Phunny.Bond{Float64}[]), b) #neighbors centered about `i`
-                #push!(get(neighbor, b.j, Phunny.Bond{Float64}[]), Phunny.Bond{Float64}(b.j,b.i,-b.R,-b.r0,b.kL,b.kT))
-                if b.i != b.j
-                    push!(neighbor[b.i], b); push!(neighbor[b.j], Phunny.Bond{Float64}(b.j,b.i,-b.R,-b.r0,b.kL,b.kT))
-                end
+            neighbor[b.i] = get(neighbor, b.i, Phunny.Bond{Float64}[])
+            neighbor[b.j] = get(neighbor, b.j, Phunny.Bond{Float64}[])
+            if b.i != b.j
+                push!(neighbor[b.i], b); push!(neighbor[b.j], Phunny.Bond{Float64}(b.j,b.i,-b.R,-b.r0,b.kL,b.kT))
             end
         end
 
